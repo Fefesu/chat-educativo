@@ -2,6 +2,7 @@
 
 :root {
   --fondo: #F6F1E7;
+  --fondo-barra: #EDE6D6;
   --panel: #FFFFFF;
   --tinta: #24352B;
   --tinta-suave: #5C6B5F;
@@ -80,6 +81,7 @@ body {
 .barra-salas {
   width: 240px;
   flex-shrink: 0;
+  background: var(--fondo-barra);
   border-right: 1px solid var(--borde);
   padding: 16px;
   display: flex;
@@ -88,9 +90,18 @@ body {
   overflow-y: auto;
   overflow-x: hidden;
 }
+.barra-salas-cab {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+}
 .barra-salas-cab p { font-size: 12px; color: var(--tinta-suave); margin: 0; text-transform: uppercase; letter-spacing: 0.03em; }
+.flecha-desplegable { font-size: 12px; color: var(--tinta-suave); }
 
 .lista-salas { display: flex; flex-direction: column; gap: 6px; }
+.lista-salas.plegada { display: none; }
 .item-sala {
   display: flex;
   justify-content: space-between;
@@ -112,6 +123,12 @@ body {
   font-size: 11px;
   cursor: pointer;
 }
+.btn-borrar-sala {
+  background: transparent !important;
+  color: var(--tinta-suave) !important;
+  padding: 4px 6px !important;
+}
+.btn-borrar-sala:hover { color: #B24C4C !important; }
 
 .form-crear-sala { display: flex; gap: 6px; width: 100%; }
 .form-crear-sala input {
@@ -141,26 +158,35 @@ body {
   flex-direction: column;
   gap: 8px;
 }
-#cuentaAnonima { display: flex; flex-direction: column; gap: 6px; }
-#cuentaAnonima input {
+#cuentaAnonima { display: flex; flex-direction: column; gap: 8px; }
+#cuentaAnonima input[type="text"], #cuentaAnonima input[type="password"] {
   padding: 6px 8px;
   border-radius: 6px;
   border: 1px solid var(--borde);
   font-size: 12px;
   font-family: 'Karla', sans-serif;
 }
-.fila-botones-cuenta { display: flex; gap: 6px; }
-.fila-botones-cuenta button {
-  flex: 1;
-  border: none;
-  border-radius: 6px;
-  padding: 6px 4px;
+.fila-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 11px;
+  color: var(--tinta-suave);
+  cursor: pointer;
+}
+.btn-cuenta-grande {
+  width: 100%;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 4px;
+  font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   font-family: 'Karla', sans-serif;
+  background: var(--verde);
+  color: #fff;
 }
-#btnRegistrar { background: var(--verde-claro); color: var(--verde); }
-#btnIniciarSesion { background: var(--verde); color: #fff; }
+.btn-cuenta-secundario { background: var(--verde-claro); color: var(--verde); }
 #textoConectadoComo { font-size: 12px; color: var(--verde); font-weight: 500; margin: 0; }
 
 .panel-admin {
@@ -192,8 +218,49 @@ body {
   font-size: 10px;
   cursor: pointer;
 }
+.btn-banear { background: #8B2E2E !important; }
 
 .zona-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+
+.barra-conectados {
+  width: 190px;
+  flex-shrink: 0;
+  background: var(--fondo-barra);
+  border-left: 1px solid var(--borde);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  overflow-y: auto;
+}
+.conectados-cab { display: flex; justify-content: space-between; align-items: center; }
+.conectados-cab p { font-size: 12px; color: var(--tinta-suave); margin: 0; text-transform: uppercase; letter-spacing: 0.03em; }
+.badge-contador {
+  background: var(--verde);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  border-radius: 10px;
+  padding: 2px 8px;
+}
+.lista-conectados { display: flex; flex-direction: column; gap: 6px; }
+.item-conectado {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.punto-conexion { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.punto-conexion.online { background: #3E8E5C; }
+.punto-conexion.offline { background: #B24C4C; }
+
+@media (max-width: 900px) {
+  .barra-conectados { display: none; }
+}
 
 .pestañas {
   display: flex;
@@ -255,6 +322,24 @@ body {
   color: var(--tinta-suave);
   background: transparent;
   padding: 4px 10px;
+}
+
+.escribiendo-aviso {
+  min-height: 18px;
+  padding: 0 24px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--tinta-suave);
+}
+
+.escribiendo-aviso {
+  min-height: 18px;
+  padding: 0 24px;
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-style: italic;
+  color: var(--tinta-suave);
 }
 
 .compositor {

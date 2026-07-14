@@ -5,6 +5,8 @@ const formulario = document.getElementById('formulario');
 const entrada = document.getElementById('entrada');
 const totalConectados = document.getElementById('totalConectados');
 const listaSalasEl = document.getElementById('listaSalas');
+const cabeceraSalas = document.getElementById('cabeceraSalas');
+const flechaSalas = document.getElementById('flechaSalas');
 const contadorSalas = document.getElementById('contadorSalas');
 const formCrearSala = document.getElementById('formCrearSala');
 const nombreSalaInput = document.getElementById('nombreSala');
@@ -22,6 +24,13 @@ const btnIniciarSesion = document.getElementById('btnIniciarSesion');
 const cuentaAnonima = document.getElementById('cuentaAnonima');
 const cuentaConectada = document.getElementById('cuentaConectada');
 const textoConectadoComo = document.getElementById('textoConectadoComo');
+const avisoEscribiendo = document.getElementById('avisoEscribiendo');
+const mayorEdadInput = document.getElementById('mayorEdadInput');
+const seccionAsignarMod = document.getElementById('seccionAsignarMod');
+const listaConectadosSala = document.getElementById('listaConectadosSala');
+const contadorConectadosSala = document.getElementById('contadorConectadosSala');
+
+const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
 
 let miNick = null;
 let miRol = 'usuario';
@@ -29,6 +38,9 @@ let salasDisponibles = [];
 let salasUnidas = new Set();
 let salaActiva = null;
 const mensajesPorSala = {};
+const escribiendoPorSala = {}; // salaId -> Set de nicks escribiendo
+const timersEscribiendo = {};  // "salaId:nick" -> timeout id
+let miTimerEscribiendo = null;
 
 function escapar(str) {
   const p = document.createElement('p');
@@ -78,19 +90,26 @@ function renderPestañas() {
 
   ids.forEach(id => {
     const b = document.createElement('button');
-    b.className = 'pestaña' + (id === salaActiva ? ' activa' : '');
-    b.style.borderLeft = `4px solid ${colorDeSala(id)}`;
+    const color = colorDeSala(id);
+    const activa = id === salaActiva;
+    b.className = 'pestaña' + (activa ? ' activa' : '');
+    b.style.borderLeft = `4px solid ${color}`;
+    if (activa) { b.style.background = color; b.style.color = '#fff'; }
     b.textContent = nombreDeSala(id);
     b.addEventListener('click', () => {
       salaActiva = id;
       renderPestañas();
       renderMensajes();
+      renderAvisoEscribiendo();
+      socket.emit('pedirUsuariosDeSala', { salaId: id });
     });
     pestañasEl.appendChild(b);
   });
 
   entrada.disabled = !salaActiva;
   entrada.placeholder = salaActiva ? 'Escribe algo con respeto y buen humor...' : 'Entra en una sala para escribir';
+  renderAvisoEscribiendo();
+  renderListaConectadosSala();
 }
 
 function renderMensajes() {
@@ -115,6 +134,27 @@ function renderMensajes() {
   chat.scrollTop = chat.scrollHeight;
 }
 
+function renderAvisoEscribiendo() {
+  const set = escribiendoPorSala[salaActiva];
+  if (!set || set.size === 0) { avisoEscribiendo.textContent = ''; return; }
+  const nombres = Array.from(set);
+  if (nombres.length === 1) avisoEscribiendo.textContent = `${nombres[0]} está escribiendo...`;
+  else if (nombres.length === 2) avisoEscribiendo.textContent = `${nombres[0]} y ${nombres[1]} están escribiendo...`;
+  else avisoEscribiendo.textContent = `Varias personas están escribiendo...`;
+}
+
+function renderListaConectadosSala() {
+  const nicks = usuariosPorSala[salaActiva] || [];
+  contadorConectadosSala.textContent = nicks.length;
+  listaConectadosSala.innerHTML = '';
+  nicks.forEach(n => {
+    const div = document.createElement('div');
+    div.className = 'item-conectado';
+    div.innerHTML = `<span class="punto-conexion online"></span><span style="color:${colorDeNick(n)}">${escapar(n)}</span>`;
+    listaConectadosSala.appendChild(div);
+  });
+}
+
 function renderListaSalas() {
   contadorSalas.textContent = `(${salasDisponibles.length}/10)`;
   listaSalasEl.innerHTML = '';
@@ -124,7 +164,7 @@ function renderListaSalas() {
     div.className = 'item-sala' + (s.id === salaActiva && (unido || esPrivilegiado()) ? ' activa' : '');
     div.style.borderLeft = `4px solid ${colorDeSala(s.id)}`;
     div.innerHTML = `
-      <span>${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
+      <span>${s.permanente ? '🔒 ' : ''}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
     `;
     const btn = document.createElement('button');
     if (esPrivilegiado()) {
@@ -138,6 +178,17 @@ function renderListaSalas() {
       btn.addEventListener('click', () => socket.emit('unirseSala', { salaId: s.id }));
     }
     div.appendChild(btn);
+
+    if (esPrivilegiado()) {
+      const btnBorrar = document.createElement('button');
+      btnBorrar.textContent = '🗑';
+      btnBorrar.className = 'btn-borrar-sala';
+      btnBorrar.addEventListener('click', () => {
+        if (confirm(`¿Eliminar la sala "${s.nombre}"?`)) socket.emit('eliminarSala', { salaId: s.id });
+      });
+      div.appendChild(btnBorrar);
+    }
+
     listaSalasEl.appendChild(div);
   });
 }
@@ -171,6 +222,11 @@ socket.on('salasActualizadas', (salas) => {
   renderPestañas();
 });
 
+socket.on('usuariosDeSala', ({ salaId, usuarios }) => {
+  usuariosPorSala[salaId] = usuarios;
+  if (salaId === salaActiva) renderListaConectadosSala();
+});
+
 socket.on('unido', ({ salaId }) => {
   salasUnidas.add(salaId);
   salaActiva = salaId;
@@ -180,15 +236,42 @@ socket.on('unido', ({ salaId }) => {
   renderMensajes();
 });
 
+socket.on('escribiendo', ({ salaId, nick }) => {
+  if (!escribiendoPorSala[salaId]) escribiendoPorSala[salaId] = new Set();
+  escribiendoPorSala[salaId].add(nick);
+  if (salaId === salaActiva) renderAvisoEscribiendo();
+
+  const clave = `${salaId}:${nick}`;
+  clearTimeout(timersEscribiendo[clave]);
+  timersEscribiendo[clave] = setTimeout(() => {
+    escribiendoPorSala[salaId] && escribiendoPorSala[salaId].delete(nick);
+    if (salaId === salaActiva) renderAvisoEscribiendo();
+  }, 3000);
+});
+
+socket.on('dejoEscribir', ({ salaId, nick }) => {
+  if (escribiendoPorSala[salaId]) escribiendoPorSala[salaId].delete(nick);
+  if (salaId === salaActiva) renderAvisoEscribiendo();
+});
+
 socket.on('mensajeSala', (msg) => {
   if (!mensajesPorSala[msg.salaId]) mensajesPorSala[msg.salaId] = [];
   mensajesPorSala[msg.salaId].push(msg);
-  if (msg.salaId === salaActiva) renderMensajes();
+  if (escribiendoPorSala[msg.salaId]) escribiendoPorSala[msg.salaId].delete(msg.nick);
+  if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
+});
+
+socket.on('salaEliminada', ({ salaId }) => {
+  salasUnidas.delete(salaId);
+  delete mensajesPorSala[salaId];
+  if (salaActiva === salaId) salaActiva = null;
+  renderListaSalas();
+  renderPestañas();
 });
 
 socket.on('sistema', ({ texto }) => {
   agregarSistemaGlobal(texto);
-  if (miRol === 'admin') socket.emit('pedirUsuarios');
+  if (esPrivilegiado()) socket.emit('pedirUsuarios');
 });
 
 socket.on('error_app', (texto) => alert(texto));
@@ -197,8 +280,9 @@ socket.on('rolAsignado', ({ rol }) => {
   miRol = rol;
   etiquetaRol.textContent = rol === 'admin' ? '👑 Administrador' : rol === 'moderador' ? '🛡️ Moderador' : '';
   btnAdmin.classList.toggle('oculto', rol !== 'usuario');
-  panelAdmin.classList.toggle('oculto', rol !== 'admin');
-  if (rol === 'admin') socket.emit('pedirUsuarios');
+  panelAdmin.classList.toggle('oculto', !esPrivilegiado());
+  seccionAsignarMod.classList.toggle('oculto', rol !== 'admin');
+  if (esPrivilegiado()) socket.emit('pedirUsuarios');
   renderListaSalas();
   renderPestañas();
 });
@@ -209,11 +293,22 @@ socket.on('listaUsuarios', (usuarios) => {
     const div = document.createElement('div');
     div.className = 'fila-usuario-admin';
     div.innerHTML = `<span>${escapar(u.nick)} <small>${u.rol !== 'usuario' ? '· ' + u.rol : ''}</small></span>`;
-    if (u.rol === 'moderador') {
+    if (u.rol === 'moderador' && miRol === 'admin') {
       const btn = document.createElement('button');
       btn.textContent = 'Quitar mod';
       btn.addEventListener('click', () => socket.emit('quitarModerador', { nickObjetivo: u.nick }));
       div.appendChild(btn);
+    }
+    if (u.nick !== miNick && u.rol !== 'admin') {
+      const btnBan = document.createElement('button');
+      btnBan.textContent = 'Banear IP';
+      btnBan.className = 'btn-banear';
+      btnBan.addEventListener('click', () => {
+        if (confirm(`¿Bloquear a ${u.nick} de este chat? No podra volver a entrar.`)) {
+          socket.emit('banearIP', { nickObjetivo: u.nick });
+        }
+      });
+      div.appendChild(btnBan);
     }
     listaUsuariosAdmin.appendChild(div);
   });
@@ -227,8 +322,9 @@ socket.on('sesionIniciada', ({ usuario, rol }) => {
   if (rol !== 'usuario') {
     miRol = rol;
     etiquetaRol.textContent = rol === 'admin' ? '👑 Administrador' : '🛡️ Moderador';
-    panelAdmin.classList.toggle('oculto', rol !== 'admin');
-    if (rol === 'admin') socket.emit('pedirUsuarios');
+    panelAdmin.classList.remove('oculto');
+    seccionAsignarMod.classList.toggle('oculto', rol !== 'admin');
+    socket.emit('pedirUsuarios');
   }
   btnAdmin.classList.toggle('oculto', rol !== 'usuario');
   renderListaSalas();
@@ -236,11 +332,22 @@ socket.on('sesionIniciada', ({ usuario, rol }) => {
 });
 
 // ---- Acciones del usuario ----
+entrada.addEventListener('input', () => {
+  if (!salaActiva) return;
+  socket.emit('escribiendo', { salaId: salaActiva });
+  clearTimeout(miTimerEscribiendo);
+  miTimerEscribiendo = setTimeout(() => {
+    socket.emit('dejoEscribir', { salaId: salaActiva });
+  }, 2000);
+});
+
 formulario.addEventListener('submit', (e) => {
   e.preventDefault();
   const texto = entrada.value.trim();
   if (!texto || !salaActiva) return;
   socket.emit('mensajeSala', { salaId: salaActiva, texto });
+  socket.emit('dejoEscribir', { salaId: salaActiva });
+  clearTimeout(miTimerEscribiendo);
   entrada.value = '';
 });
 
@@ -257,6 +364,11 @@ btnAdmin.addEventListener('click', () => {
   if (clave) socket.emit('reclamarAdmin', { clave });
 });
 
+cabeceraSalas.addEventListener('click', () => {
+  listaSalasEl.classList.toggle('plegada');
+  flechaSalas.textContent = listaSalasEl.classList.contains('plegada') ? '▸' : '▾';
+});
+
 btnAsignarMod.addEventListener('click', () => {
   const nickObjetivo = nickModeradorInput.value.trim();
   if (!nickObjetivo) return;
@@ -268,7 +380,8 @@ btnRegistrar.addEventListener('click', () => {
   const usuario = usuarioInput.value.trim();
   const contrasena = contrasenaInput.value;
   if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
-  socket.emit('registrar', { usuario, contrasena });
+  if (!mayorEdadInput.checked) { alert('Debes confirmar que eres mayor de 18 años.'); return; }
+  socket.emit('registrar', { usuario, contrasena, mayorDeEdad: true });
 });
 
 btnIniciarSesion.addEventListener('click', () => {
