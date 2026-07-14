@@ -202,10 +202,10 @@ body {
 }
 
 .mensaje .nick {
-  font-weight: 500;
-  font-size: 13px;
+  font-weight: 700;
+  font-size: 15px;
   color: var(--verde);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .mensaje .texto { font-size: 15px; line-height: 1.4; }
