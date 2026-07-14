@@ -39,6 +39,9 @@ async function conectarDB() {
   await cliente.connect();
   usuariosCol = cliente.db('chat_educativo').collection('usuarios');
   await usuariosCol.createIndex({ usuario: 1 }, { unique: true });
+  baneadosCol = cliente.db('chat_educativo').collection('baneados');
+  await baneadosCol.createIndex({ ip: 1 }, { unique: true });
+  await cargarBaneados();
   console.log('Conectado a la base de datos correctamente');
 }
 
@@ -53,7 +56,22 @@ function esModOAdmin(socketId) {
 }
 
 function listaSalas() {
-  return Array.from(salas.values()).map(s => ({ id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size }));
+  return Array.from(salas.values()).map(s => ({
+    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente
+  }));
+}
+
+function usuariosDeSala(sala) {
+  return Array.from(sala.usuarios).map(id => usuariosConectados.get(id)).filter(Boolean);
+}
+
+function marcarEstadoVacio(sala) {
+  if (sala.permanente) { sala.vacioDesde = null; return; }
+  if (sala.usuarios.size === 0) {
+    if (!sala.vacioDesde) sala.vacioDesde = Date.now();
+  } else {
+    sala.vacioDesde = null;
+  }
 }
 
 function listaUsuarios() {
@@ -67,7 +85,64 @@ function rolDe(socketId) {
   return socketId === adminSocketId ? 'admin' : (moderadores.has(socketId) ? 'moderador' : 'usuario');
 }
 
+// ---- Filtro basico de palabras malsonantes / faltas de respeto ----
+// No es infalible (ningun filtro automatico lo es), pero cubre los casos mas comunes.
+const PALABRAS_PROHIBIDAS = [
+  'gilipollas', 'imbecil', 'idiota', 'subnormal', 'retrasado', 'tonto de remate',
+  'hijo de puta', 'hijoputa', 'cabron', 'cabrona', 'zorra', 'puta', 'puto',
+  'mierda', 'joder te', 'maricon', 'marica', 'negro de mierda', 'sudaca',
+  'nazi', 'pedofilo'
+];
+
+function contieneMalasPalabras(texto) {
+  const t = texto.toLowerCase();
+  return PALABRAS_PROHIBIDAS.some(p => t.includes(p));
+}
+
+function censurar(texto) {
+  let resultado = texto;
+  PALABRAS_PROHIBIDAS.forEach(p => {
+    const regex = new RegExp(p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    resultado = resultado.replace(regex, m => m[0] + '*'.repeat(Math.max(m.length - 1, 1)));
+  });
+  return resultado;
+}
+
+// ---- Antispam: maximo de mensajes por usuario en una ventana de tiempo ----
+const LIMITE_MENSAJES = 5;
+const VENTANA_MS = 5000;
+const historialMensajes = new Map(); // socket.id -> array de timestamps
+
+function estaEnFlood(socketId) {
+  const ahora = Date.now();
+  const historial = (historialMensajes.get(socketId) || []).filter(t => ahora - t < VENTANA_MS);
+  historial.push(ahora);
+  historialMensajes.set(socketId, historial);
+  return historial.length > LIMITE_MENSAJES;
+}
+
+// ---- IPs baneadas (persistentes si hay base de datos) ----
+let baneadosCol = null;
+const ipsBaneadasCache = new Set();
+
+async function cargarBaneados() {
+  if (!baneadosCol) return;
+  const baneados = await baneadosCol.find({}).toArray();
+  baneados.forEach(b => ipsBaneadasCache.add(b.ip));
+}
+
+function obtenerIP(socket) {
+  return (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+}
+
 io.on('connection', (socket) => {
+  const ip = obtenerIP(socket);
+  if (ipsBaneadasCache.has(ip)) {
+    socket.emit('error_app', 'Tu acceso a este chat ha sido bloqueado.');
+    socket.disconnect(true);
+    return;
+  }
+
   const nick = generarNick();
   usuariosConectados.set(socket.id, nick);
   socket.data.salasUnidas = new Set();
@@ -78,8 +153,9 @@ io.on('connection', (socket) => {
   io.emit('totalConectados', usuariosConectados.size);
 
   // ---- Registro de cuenta nueva ----
-  socket.on('registrar', async ({ usuario, contrasena }) => {
+  socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El registro no esta disponible ahora mismo.'); return; }
+    if (!mayorDeEdad) { socket.emit('error_app', 'Debes confirmar que eres mayor de 18 años para registrarte.'); return; }
     const u = String(usuario || '').trim().toLowerCase();
     const p = String(contrasena || '');
     if (!/^[a-z0-9_]{3,20}$/.test(u)) {
@@ -92,7 +168,7 @@ io.on('connection', (socket) => {
     }
     try {
       const hash = await bcrypt.hash(p, 10);
-      await usuariosCol.insertOne({ usuario: u, hash, rol: 'usuario', creado: new Date() });
+      await usuariosCol.insertOne({ usuario: u, hash, rol: 'usuario', mayorDeEdad: true, creado: new Date() });
       aplicarSesion(socket, u, 'usuario');
       socket.emit('sesionIniciada', { usuario: u, rol: 'usuario' });
       io.emit('sistema', { texto: `${u} se ha registrado` });
@@ -131,7 +207,8 @@ io.on('connection', (socket) => {
     if (!nombreLimpio) return;
     if (salas.size >= MAX_SALAS) { socket.emit('error_app', 'Ya existen 10 salas, el maximo permitido.'); return; }
     const id = 'sala_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-    salas.set(id, { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set() });
+    const permanente = esModOAdmin(socket.id);
+    salas.set(id, { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set(), vacioDesde: permanente ? null : Date.now(), permanente });
     io.emit('salasActualizadas', listaSalas());
     io.emit('sistema', { texto: `${usuariosConectados.get(socket.id)} ha creado la sala "${nombreLimpio}"` });
   });
@@ -149,8 +226,10 @@ io.on('connection', (socket) => {
     socket.join(salaId);
     sala.usuarios.add(socket.id);
     socket.data.salasUnidas.add(salaId);
+    marcarEstadoVacio(sala);
     socket.emit('unido', { salaId });
     io.emit('salasActualizadas', listaSalas());
+    io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
   });
 
   // ---- Salir de sala ----
@@ -158,7 +237,7 @@ io.on('connection', (socket) => {
     const sala = salas.get(salaId);
     socket.leave(salaId);
     socket.data.salasUnidas.delete(salaId);
-    if (sala) sala.usuarios.delete(socket.id);
+    if (sala) { sala.usuarios.delete(socket.id); marcarEstadoVacio(sala); io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) }); }
     io.emit('salasActualizadas', listaSalas());
   });
 
@@ -169,8 +248,14 @@ io.on('connection', (socket) => {
     const privilegiado = esModOAdmin(socket.id);
     if (!privilegiado && !socket.data.salasUnidas.has(salaId)) return;
 
-    const textoLimpio = String(texto || '').trim().slice(0, 500);
+    if (estaEnFlood(socket.id)) {
+      socket.emit('error_app', 'Estas enviando mensajes demasiado rapido. Espera unos segundos.');
+      return;
+    }
+
+    let textoLimpio = String(texto || '').trim().slice(0, 500);
     if (!textoLimpio) return;
+    if (contieneMalasPalabras(textoLimpio)) textoLimpio = censurar(textoLimpio);
 
     const msg = {
       salaId,
@@ -221,15 +306,68 @@ io.on('connection', (socket) => {
     io.emit('sistema', { texto: `${u} ya no es moderador` });
   });
 
+  // ---- Indicador de "esta escribiendo" ----
+  socket.on('escribiendo', ({ salaId }) => {
+    if (!salaId) return;
+    socket.to(salaId).emit('escribiendo', { salaId, nick: usuariosConectados.get(socket.id) });
+  });
+
+  socket.on('dejoEscribir', ({ salaId }) => {
+    if (!salaId) return;
+    socket.to(salaId).emit('dejoEscribir', { salaId, nick: usuariosConectados.get(socket.id) });
+  });
+
+  // ---- Eliminar sala (admin o quien la creo) ----
+  // ---- Banear IP (admin o moderador) ----
+  socket.on('banearIP', async ({ nickObjetivo }) => {
+    if (!esModOAdmin(socket.id)) return;
+    const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n === nickObjetivo);
+    if (!destino) { socket.emit('error_app', 'Ese usuario no esta conectado ahora mismo.'); return; }
+    const [socketIdDestino] = destino;
+    const socketDestino = io.sockets.sockets.get(socketIdDestino);
+    if (!socketDestino) return;
+    const ip = obtenerIP(socketDestino);
+    ipsBaneadasCache.add(ip);
+    if (baneadosCol) {
+      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, fecha: new Date() }); } catch (e) { /* ya existia */ }
+    }
+    socketDestino.emit('error_app', 'Has sido bloqueado de este chat por un administrador.');
+    socketDestino.disconnect(true);
+    io.emit('sistema', { texto: `${nickObjetivo} ha sido bloqueado del chat` });
+  });
+
+  socket.on('eliminarSala', ({ salaId }) => {
+    const sala = salas.get(salaId);
+    if (!sala) return;
+    const puedeEliminar = esModOAdmin(socket.id) || sala.creador === usuariosConectados.get(socket.id);
+    if (!puedeEliminar) { socket.emit('error_app', 'No puedes eliminar esta sala.'); return; }
+    salas.delete(salaId);
+    io.socketsLeave(salaId);
+    io.emit('salasActualizadas', listaSalas());
+    io.emit('salaEliminada', { salaId });
+    io.emit('sistema', { texto: `La sala "${sala.nombre}" ha sido eliminada` });
+  });
+
+  socket.on('pedirUsuariosDeSala', ({ salaId }) => {
+    const sala = salas.get(salaId);
+    if (sala) socket.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
+  });
+
   socket.on('pedirUsuarios', () => {
-    if (socket.id === adminSocketId) socket.emit('listaUsuarios', listaUsuarios());
+    if (esModOAdmin(socket.id)) socket.emit('listaUsuarios', listaUsuarios());
   });
 
   // ---- Desconexion ----
   socket.on('disconnect', () => {
     const nickSaliente = usuariosConectados.get(socket.id);
     usuariosConectados.delete(socket.id);
-    salas.forEach(sala => sala.usuarios.delete(socket.id));
+    salas.forEach(sala => {
+      if (sala.usuarios.has(socket.id)) {
+        sala.usuarios.delete(socket.id);
+        marcarEstadoVacio(sala);
+        io.emit('usuariosDeSala', { salaId: sala.id, usuarios: usuariosDeSala(sala) });
+      }
+    });
     if (adminSocketId === socket.id) adminSocketId = null;
     moderadores.delete(socket.id);
     io.emit('sistema', { texto: `${nickSaliente} se ha desconectado` });
@@ -239,6 +377,20 @@ io.on('connection', (socket) => {
 });
 
 const PUERTO = process.env.PORT || 3000;
+
+// Cada minuto, borra las salas que llevan 5 minutos o mas sin nadie dentro
+setInterval(() => {
+  const ahora = Date.now();
+  salas.forEach((sala, id) => {
+    if (sala.vacioDesde && ahora - sala.vacioDesde >= 5 * 60 * 1000) {
+      salas.delete(id);
+      io.emit('salasActualizadas', listaSalas());
+      io.emit('salaEliminada', { salaId: id });
+      io.emit('sistema', { texto: `La sala "${sala.nombre}" se elimino por estar vacia` });
+    }
+  });
+}, 60 * 1000);
+
 conectarDB().finally(() => {
   server.listen(PUERTO, () => console.log(`Chat educativo escuchando en el puerto ${PUERTO}`));
 });
