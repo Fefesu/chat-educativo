@@ -40,6 +40,15 @@ function escapar(str) {
 // obtiene el mismo color (se calcula a partir de las letras de su nick),
 // asi que se ve igual en la pantalla de todo el mundo.
 const PALETA_NICKS = ['#B24C4C', '#4C6FB2', '#7A4CB2', '#3E8E8E', '#B2854C', '#3E8E5C', '#B24C8F', '#5C6BC0', '#2F7DA6', '#A65E2F'];
+const PALETA_SALAS = ['#C9622A', '#2F7D6B', '#7A4CB2', '#B23F63', '#2F6EA6', '#8E7A2F', '#4C8F3E', '#A6472F', '#4C6FB2', '#8F3E6B'];
+
+function colorDeSala(id) {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return PALETA_SALAS[Math.abs(hash) % PALETA_SALAS.length];
+}
 
 function colorDeNick(nick) {
   let hash = 0;
@@ -70,6 +79,7 @@ function renderPestañas() {
   ids.forEach(id => {
     const b = document.createElement('button');
     b.className = 'pestaña' + (id === salaActiva ? ' activa' : '');
+    b.style.borderLeft = `4px solid ${colorDeSala(id)}`;
     b.textContent = nombreDeSala(id);
     b.addEventListener('click', () => {
       salaActiva = id;
@@ -112,6 +122,7 @@ function renderListaSalas() {
     const unido = salasUnidas.has(s.id);
     const div = document.createElement('div');
     div.className = 'item-sala' + (s.id === salaActiva && (unido || esPrivilegiado()) ? ' activa' : '');
+    div.style.borderLeft = `4px solid ${colorDeSala(s.id)}`;
     div.innerHTML = `
       <span>${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
     `;
