@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>La Plaza · Chat</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="cabecera">
+      <div class="marca">
+        <span class="marca-punto"></span>
+        <h1>La Plaza</h1>
+      </div>
+      <div class="cabecera-derecha">
+        <span class="etiqueta-rol" id="etiquetaRol"></span>
+        <button class="btn-link" id="btnAdmin">Acceder como admin</button>
+        <span class="estado" id="estado">
+          <span class="estado-punto"></span>
+          <span id="totalConectados">Conectando...</span>
+        </span>
+      </div>
+    </header>
+
+    <div class="cuerpo">
+      <aside class="barra-salas">
+        <div class="barra-salas-cab">
+          <p>Salas <span id="contadorSalas">(0/10)</span></p>
+        </div>
+        <div id="listaSalas" class="lista-salas"></div>
+        <form id="formCrearSala" class="form-crear-sala">
+          <input type="text" id="nombreSala" placeholder="Nueva sala..." maxlength="30">
+          <button type="submit">+</button>
+        </form>
+
+        <div id="panelAdmin" class="panel-admin oculto">
+          <p class="panel-admin-titulo">Panel de administracion</p>
+          <div class="form-crear-sala">
+            <input type="text" id="nickModerador" placeholder="Nick a hacer moderador">
+            <button id="btnAsignarMod" type="button">Asignar</button>
+          </div>
+          <div id="listaUsuariosAdmin" class="lista-usuarios-admin"></div>
+        </div>
+      </aside>
+
+      <main class="zona-chat">
+        <div class="pestañas" id="pestañas"></div>
+        <div class="chat" id="chat"></div>
+        <form class="compositor" id="formulario">
+          <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="500">
+          <button type="submit">Enviar</button>
+        </form>
+      </main>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
