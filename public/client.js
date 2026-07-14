@@ -29,6 +29,19 @@ function escapar(str) {
   return p.innerHTML;
 }
 
+// Paleta de colores para diferenciar nicks. La misma persona siempre
+// obtiene el mismo color (se calcula a partir de las letras de su nick),
+// asi que se ve igual en la pantalla de todo el mundo.
+const PALETA_NICKS = ['#B24C4C', '#4C6FB2', '#7A4CB2', '#3E8E8E', '#B2854C', '#3E8E5C', '#B24C8F', '#5C6BC0', '#2F7DA6', '#A65E2F'];
+
+function colorDeNick(nick) {
+  let hash = 0;
+  for (let i = 0; i < nick.length; i++) {
+    hash = nick.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return PALETA_NICKS[Math.abs(hash) % PALETA_NICKS.length];
+}
+
 function esPrivilegiado() {
   return miRol === 'admin' || miRol === 'moderador';
 }
@@ -75,7 +88,7 @@ function renderMensajes() {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       const etiquetaRolMsg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
       div.innerHTML = `
-        <div class="nick">${escapar(item.nick)}${etiquetaRolMsg}</div>
+        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}${etiquetaRolMsg}</div>
         <div class="texto">${escapar(item.texto)}</div>
         <div class="hora">${item.hora}</div>
       `;
