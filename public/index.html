@@ -34,10 +34,25 @@
           <button type="submit">+</button>
         </form>
 
+        <div id="panelCuenta" class="panel-cuenta">
+          <p class="panel-admin-titulo">Cuenta</p>
+          <div id="cuentaAnonima">
+            <input type="text" id="usuarioInput" placeholder="Nombre de usuario" maxlength="20">
+            <input type="password" id="contrasenaInput" placeholder="Contrasena" maxlength="50">
+            <div class="fila-botones-cuenta">
+              <button type="button" id="btnRegistrar">Registrarme</button>
+              <button type="button" id="btnIniciarSesion">Entrar</button>
+            </div>
+          </div>
+          <div id="cuentaConectada" class="oculto">
+            <p id="textoConectadoComo"></p>
+          </div>
+        </div>
+
         <div id="panelAdmin" class="panel-admin oculto">
           <p class="panel-admin-titulo">Panel de administracion</p>
           <div class="form-crear-sala">
-            <input type="text" id="nickModerador" placeholder="Nick a hacer moderador">
+            <input type="text" id="nickModerador" placeholder="Usuario a hacer moderador">
             <button id="btnAsignarMod" type="button">Asignar</button>
           </div>
           <div id="listaUsuariosAdmin" class="lista-usuarios-admin"></div>

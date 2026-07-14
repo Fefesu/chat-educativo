@@ -15,6 +15,13 @@ const panelAdmin = document.getElementById('panelAdmin');
 const btnAsignarMod = document.getElementById('btnAsignarMod');
 const nickModeradorInput = document.getElementById('nickModerador');
 const listaUsuariosAdmin = document.getElementById('listaUsuariosAdmin');
+const usuarioInput = document.getElementById('usuarioInput');
+const contrasenaInput = document.getElementById('contrasenaInput');
+const btnRegistrar = document.getElementById('btnRegistrar');
+const btnIniciarSesion = document.getElementById('btnIniciarSesion');
+const cuentaAnonima = document.getElementById('cuentaAnonima');
+const cuentaConectada = document.getElementById('cuentaConectada');
+const textoConectadoComo = document.getElementById('textoConectadoComo');
 
 let miNick = null;
 let miRol = 'usuario';
@@ -201,6 +208,22 @@ socket.on('listaUsuarios', (usuarios) => {
   });
 });
 
+socket.on('sesionIniciada', ({ usuario, rol }) => {
+  miNick = usuario;
+  cuentaAnonima.classList.add('oculto');
+  cuentaConectada.classList.remove('oculto');
+  textoConectadoComo.textContent = `Conectado como ${usuario}`;
+  if (rol !== 'usuario') {
+    miRol = rol;
+    etiquetaRol.textContent = rol === 'admin' ? '👑 Administrador' : '🛡️ Moderador';
+    panelAdmin.classList.toggle('oculto', rol !== 'admin');
+    if (rol === 'admin') socket.emit('pedirUsuarios');
+  }
+  btnAdmin.classList.toggle('oculto', rol !== 'usuario');
+  renderListaSalas();
+  renderPestañas();
+});
+
 // ---- Acciones del usuario ----
 formulario.addEventListener('submit', (e) => {
   e.preventDefault();
@@ -228,4 +251,18 @@ btnAsignarMod.addEventListener('click', () => {
   if (!nickObjetivo) return;
   socket.emit('asignarModerador', { nickObjetivo });
   nickModeradorInput.value = '';
+});
+
+btnRegistrar.addEventListener('click', () => {
+  const usuario = usuarioInput.value.trim();
+  const contrasena = contrasenaInput.value;
+  if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
+  socket.emit('registrar', { usuario, contrasena });
+});
+
+btnIniciarSesion.addEventListener('click', () => {
+  const usuario = usuarioInput.value.trim();
+  const contrasena = contrasenaInput.value;
+  if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
+  socket.emit('iniciarSesion', { usuario, contrasena });
 });

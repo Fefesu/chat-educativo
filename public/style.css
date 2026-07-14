@@ -133,6 +133,36 @@ body {
   cursor: pointer;
 }
 
+.panel-cuenta {
+  margin-top: 10px;
+  padding-top: 12px;
+  border-top: 1px solid var(--borde);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+#cuentaAnonima { display: flex; flex-direction: column; gap: 6px; }
+#cuentaAnonima input {
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid var(--borde);
+  font-size: 12px;
+  font-family: 'Karla', sans-serif;
+}
+.fila-botones-cuenta { display: flex; gap: 6px; }
+.fila-botones-cuenta button {
+  flex: 1;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 4px;
+  font-size: 11px;
+  cursor: pointer;
+  font-family: 'Karla', sans-serif;
+}
+#btnRegistrar { background: var(--verde-claro); color: var(--verde); }
+#btnIniciarSesion { background: var(--verde); color: #fff; }
+#textoConectadoComo { font-size: 12px; color: var(--verde); font-weight: 500; margin: 0; }
+
 .panel-admin {
   margin-top: 10px;
   padding-top: 12px;
@@ -202,10 +232,12 @@ body {
 }
 
 .mensaje .nick {
-  font-weight: 700;
+  font-family: 'Fraunces', serif;
+  font-weight: 600;
   font-size: 15px;
+  letter-spacing: 0.01em;
   color: var(--verde);
-  margin-bottom: 3px;
+  margin-bottom: 4px;
 }
 
 .mensaje .texto { font-size: 15px; line-height: 1.4; }
