@@ -1,0 +1,13 @@
+{
+  "name": "chat-educativo",
+  "version": "1.0.0",
+  "description": "Chat en tiempo real con salas y moderacion",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
