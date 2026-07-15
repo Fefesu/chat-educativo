@@ -586,8 +586,27 @@ body {
   padding: 14px 30px;
   border-radius: 12px;
   transition: background 0.15s;
+  border: none;
+  cursor: pointer;
+  font-family: 'Karla', sans-serif;
 }
 .landing-btn-entrar:hover { background: #264C3E; }
+.landing-btn-entrar:disabled {
+  background: var(--borde);
+  color: var(--tinta-suave);
+  cursor: not-allowed;
+}
+.landing-checkbox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-size: 13.5px;
+  color: var(--tinta-suave);
+  margin-bottom: 18px;
+  cursor: pointer;
+}
+.landing-checkbox input { width: 16px; height: 16px; cursor: pointer; }
 
 .landing-seccion {
   padding: 34px 0;
@@ -630,6 +649,13 @@ body {
 
 @media (max-width: 600px) {
   .landing { padding: 0 16px 40px; }
-  .landing-hero h2 { font-size: 24px; }
+  .landing-cabecera { padding: 20px 0 6px; }
+  .marca h1 { font-size: 20px; }
+  .landing-hero { padding: 28px 0 34px; }
+  .landing-hero h2 { font-size: 22px; }
   .landing-subtexto { font-size: 14px; }
+  .landing-btn-entrar { width: 100%; box-sizing: border-box; padding: 14px 20px; font-size: 15px; }
+  .landing-seccion { padding: 26px 0; }
+  .landing-seccion h3 { font-size: 17px; }
+  .landing-seccion p, .landing-lista li { font-size: 13.5px; }
 }
