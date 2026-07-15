@@ -35,6 +35,9 @@ const contadorConectadosSala = document.getElementById('contadorConectadosSala')
 const btnAdjuntar = document.getElementById('btnAdjuntar');
 const inputArchivo = document.getElementById('inputArchivo');
 const privadosContenedor = document.getElementById('privadosContenedor');
+const cabeceraBaneados = document.getElementById('cabeceraBaneados');
+const flechaBaneados = document.getElementById('flechaBaneados');
+const listaBaneadosEl = document.getElementById('listaBaneadosEl');
 
 const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
 const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true }
@@ -316,6 +319,37 @@ socket.on('rolAsignado', ({ rol }) => {
   if (esPrivilegiado()) socket.emit('pedirUsuarios');
   renderListaSalas();
   renderPestañas();
+});
+
+socket.on('listaBaneados', (baneados) => {
+  listaBaneadosEl.innerHTML = '';
+  if (baneados.length === 0) {
+    listaBaneadosEl.innerHTML = '<p style="font-size:11px;color:var(--tinta-suave)">Nadie bloqueado por ahora.</p>';
+    return;
+  }
+  baneados.forEach(b => {
+    const div = document.createElement('div');
+    div.className = 'fila-baneado';
+    div.innerHTML = `
+      <span><strong>${escapar(b.nick)}</strong></span>
+      <span class="detalle-baneo">Bloqueado por ${escapar(b.baneadoPor)} · ${escapar(b.fecha)}</span>
+    `;
+    const btn = document.createElement('button');
+    btn.textContent = 'Desbanear';
+    btn.addEventListener('click', () => {
+      if (confirm(`¿Desbloquear a ${b.nick}? Podra volver a entrar al chat.`)) {
+        socket.emit('desbanearIP', { ip: b.ip });
+      }
+    });
+    div.appendChild(btn);
+    listaBaneadosEl.appendChild(div);
+  });
+});
+
+cabeceraBaneados.addEventListener('click', () => {
+  listaBaneadosEl.classList.toggle('plegada');
+  flechaBaneados.textContent = listaBaneadosEl.classList.contains('plegada') ? '▸' : '▾';
+  if (!listaBaneadosEl.classList.contains('plegada')) socket.emit('pedirBaneados');
 });
 
 socket.on('listaUsuarios', (usuarios) => {

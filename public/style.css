@@ -100,6 +100,7 @@ body {
 
 .lista-salas { display: flex; flex-direction: column; gap: 6px; }
 .lista-salas.plegada { display: none; }
+.lista-usuarios-admin.plegada { display: none; }
 .item-sala {
   display: flex;
   justify-content: space-between;
@@ -220,6 +221,29 @@ body {
 }
 .btn-banear { background: #8B2E2E !important; }
 
+.fila-baneado {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.fila-baneado .detalle-baneo { color: var(--tinta-suave); }
+.fila-baneado button {
+  align-self: flex-start;
+  margin-top: 3px;
+  border: none;
+  background: var(--verde);
+  color: #fff;
+  border-radius: 6px;
+  padding: 3px 8px;
+  font-size: 10px;
+  cursor: pointer;
+}
+
 .zona-chat { flex: 1; display: flex; flex-direction: column; min-width: 0; }
 
 .barra-conectados {
@@ -245,15 +269,18 @@ body {
 }
 .lista-conectados { display: flex; flex-direction: column; gap: 6px; }
 .btn-camara {
-  border: 1px solid var(--borde);
-  background: var(--panel);
+  border: none;
+  background: var(--ambar);
   border-radius: 10px;
-  padding: 0 14px;
-  font-size: 18px;
+  padding: 0 16px;
+  font-size: 22px;
   cursor: pointer;
   line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
-.btn-camara:hover { border-color: var(--verde); }
+.btn-camara:hover { background: #C27A22; }
 
 .mensaje img.imagen-chat {
   max-width: 220px;
