@@ -365,12 +365,35 @@ io.on('connection', (socket) => {
     if (!socketDestino) return;
     const ip = obtenerIP(socketDestino);
     ipsBaneadasCache.add(ip);
+    const baneadoPor = usuariosConectados.get(socket.id);
     if (baneadosCol) {
-      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, fecha: new Date() }); } catch (e) { /* ya existia */ }
+      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, baneadoPor, fecha: new Date() }); } catch (e) { /* ya existia */ }
     }
     socketDestino.emit('error_app', 'Has sido bloqueado de este chat por un administrador.');
     socketDestino.disconnect(true);
     io.emit('sistema', { texto: `${nickObjetivo} ha sido bloqueado del chat` });
+  });
+
+  // ---- Listado y desbaneo de IPs (admin o moderador) ----
+  socket.on('pedirBaneados', async () => {
+    if (!esModOAdmin(socket.id) || !baneadosCol) return;
+    const lista = await baneadosCol.find({}).sort({ fecha: -1 }).toArray();
+    socket.emit('listaBaneados', lista.map(b => ({
+      ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
+      fecha: new Date(b.fecha).toLocaleString('es-ES')
+    })));
+  });
+
+  socket.on('desbanearIP', async ({ ip }) => {
+    if (!esModOAdmin(socket.id)) return;
+    ipsBaneadasCache.delete(ip);
+    if (baneadosCol) await baneadosCol.deleteOne({ ip });
+    socket.emit('avisoOk', 'IP desbloqueada correctamente.');
+    const lista = baneadosCol ? await baneadosCol.find({}).sort({ fecha: -1 }).toArray() : [];
+    socket.emit('listaBaneados', lista.map(b => ({
+      ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
+      fecha: new Date(b.fecha).toLocaleString('es-ES')
+    })));
   });
 
   // ---- Chats privados (100% anonimos, ni siquiera admin/mod los ven) ----
