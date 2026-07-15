@@ -32,8 +32,7 @@ body {
 }
 
 @media (max-width: 700px) {
-  .cuerpo { flex-direction: column; }
-  .barra-salas { width: 100%; max-height: 160px; border-right: none; border-bottom: 1px solid var(--borde); }
+  .barra-salas { border-bottom: 1px solid var(--borde); }
 }
 
 .cabecera {
@@ -272,8 +271,8 @@ body {
   border: none;
   background: var(--ambar);
   border-radius: 10px;
-  padding: 0 16px;
-  font-size: 22px;
+  padding: 0 18px;
+  font-size: 28px;
   cursor: pointer;
   line-height: 1;
   display: flex;
@@ -365,9 +364,7 @@ body {
 .punto-conexion.online { background: #3E8E5C; }
 .punto-conexion.offline { background: #B24C4C; }
 
-@media (max-width: 900px) {
-  .barra-conectados { display: none; }
-}
+
 
 .pestañas {
   display: flex;
@@ -404,6 +401,19 @@ body {
   border: 1px solid var(--borde);
   align-self: flex-start;
 }
+
+.mensaje { position: relative; }
+.btn-reportar {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  background: transparent;
+  border: none;
+  font-size: 11px;
+  opacity: 0.35;
+  cursor: pointer;
+}
+.btn-reportar:hover { opacity: 1; }
 
 .mensaje .nick {
   font-family: 'Fraunces', serif;
@@ -474,3 +484,53 @@ body {
   font-family: 'Karla', sans-serif;
 }
 .compositor button:hover { background: #264C3E; }
+
+/* ================== VERSION MOVIL ================== */
+@media (max-width: 760px) {
+  .cabecera { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
+  .marca h1 { font-size: 18px; }
+  .cabecera-derecha { gap: 8px; font-size: 11px; flex-wrap: wrap; }
+  .estado { font-size: 11px; }
+  .btn-link { font-size: 11px; padding: 5px 8px; }
+
+  .cuerpo { flex-direction: column; overflow-y: auto; }
+
+  .barra-salas {
+    width: 100%;
+    max-height: 40vh;
+    border-right: none;
+  }
+
+  .zona-chat { min-height: 55vh; }
+
+  .barra-conectados {
+    width: 100%;
+    max-height: 25vh;
+    border-left: none;
+    border-top: 1px solid var(--borde);
+  }
+
+  .pestañas { padding: 8px 10px 0; }
+  .pestaña { padding: 5px 10px; font-size: 12px; }
+
+  .chat { padding: 14px 10px; }
+  .mensaje { max-width: 90%; padding: 8px 12px; }
+  .mensaje .nick { font-size: 14px; }
+  .mensaje img.imagen-chat { max-width: 100%; }
+
+  .escribiendo-aviso { padding: 3px 10px; }
+
+  .compositor { padding: 10px 10px 14px; gap: 6px; }
+  .compositor input { padding: 10px 12px; font-size: 14px; }
+  .btn-camara { font-size: 20px; padding: 0 12px; }
+  .compositor button { padding: 10px 14px; font-size: 13px; }
+
+  .privados-contenedor {
+    right: 8px;
+    left: 8px;
+    bottom: 8px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ventana-privado { width: 100%; height: 260px; }
+}

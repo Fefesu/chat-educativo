@@ -122,6 +122,19 @@ function renderPestañas() {
   renderListaConectadosSala();
 }
 
+function crearBotonReportar(nickReportado, texto) {
+  const btn = document.createElement('button');
+  btn.className = 'btn-reportar';
+  btn.textContent = '🚩';
+  btn.title = 'Reportar este mensaje';
+  btn.addEventListener('click', () => {
+    if (confirm(`¿Reportar este mensaje de ${nickReportado} a los moderadores?`)) {
+      socket.emit('reportarMensaje', { salaId: salaActiva, nickReportado, texto });
+    }
+  });
+  return btn;
+}
+
 function renderMensajes() {
   chat.innerHTML = '';
   const lista = mensajesPorSala[salaActiva] || [];
@@ -141,6 +154,7 @@ function renderMensajes() {
         ${cuerpoImg}
         <div class="hora">${item.hora}</div>
       `;
+      if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, '[imagen]'));
     } else {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       const etiquetaRolMsg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
@@ -149,6 +163,7 @@ function renderMensajes() {
         <div class="texto">${escapar(item.texto)}</div>
         <div class="hora">${item.hora}</div>
       `;
+      if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, item.texto));
     }
     chat.appendChild(div);
   });
