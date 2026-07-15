@@ -221,12 +221,13 @@ function renderListaSalas() {
     }
     div.appendChild(btn);
 
-    if (esPrivilegiado()) {
+    if (esPrivilegiado() || s.creador === miNick) {
       const btnBorrar = document.createElement('button');
       btnBorrar.textContent = '🗑';
       btnBorrar.className = 'btn-borrar-sala';
+      btnBorrar.title = (s.creador === miNick && !esPrivilegiado()) ? 'Cerrar tu sala' : 'Eliminar sala';
       btnBorrar.addEventListener('click', () => {
-        if (confirm(`¿Eliminar la sala "${s.nombre}"?`)) socket.emit('eliminarSala', { salaId: s.id });
+        if (confirm(`¿Cerrar la sala "${s.nombre}"?`)) socket.emit('eliminarSala', { salaId: s.id });
       });
       div.appendChild(btnBorrar);
     }

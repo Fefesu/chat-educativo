@@ -3,102 +3,62 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>La Plaza · Chat</title>
+<title>La Plaza · Bienvenida</title>
 <link rel="stylesheet" href="style.css">
 </head>
-<body>
-  <div class="app">
-    <header class="cabecera">
+<body class="landing-body">
+  <div class="landing">
+    <header class="landing-cabecera">
       <div class="marca">
         <span class="marca-punto"></span>
         <h1>La Plaza</h1>
       </div>
-      <div class="cabecera-derecha">
-        <span class="etiqueta-rol" id="etiquetaRol"></span>
-        <button class="btn-link" id="btnAdmin">Acceder como admin</button>
-        <span class="estado" id="estado">
-          <span class="estado-punto"></span>
-          <span id="totalConectados">Conectando...</span>
-        </span>
-      </div>
     </header>
 
-    <div class="cuerpo">
-      <aside class="barra-salas">
-        <div class="barra-salas-cab" id="cabeceraSalas">
-          <p>Salas <span id="contadorSalas">(0/10)</span></p>
-          <span class="flecha-desplegable" id="flechaSalas">▾</span>
-        </div>
-        <div id="listaSalas" class="lista-salas"></div>
-        <form id="formCrearSala" class="form-crear-sala">
-          <input type="text" id="nombreSala" placeholder="Nueva sala..." maxlength="30">
-          <button type="submit">+</button>
-        </form>
+    <section class="landing-hero">
+      <p class="landing-eyebrow">Un espacio de conversación</p>
+      <h2>Educación, respeto y buen humor, ante todo.</h2>
+      <p class="landing-subtexto">Salas de chat en tiempo real, abiertas a todo el mundo. Antes de entrar, tómate un minuto para leer cómo funciona esto.</p>
+      <a href="/chat.html" class="landing-btn-entrar">Entrar al chat →</a>
+    </section>
 
-        <div id="panelCuenta" class="panel-cuenta">
-          <p class="panel-admin-titulo">Cuenta</p>
-          <div id="cuentaAnonima">
-            <input type="text" id="usuarioInput" placeholder="Nombre de usuario" maxlength="20">
-            <input type="password" id="contrasenaInput" placeholder="Contrasena" maxlength="50">
-            <label class="fila-checkbox">
-              <input type="checkbox" id="mayorEdadInput">
-              <span>Confirmo que soy mayor de 18 años</span>
-            </label>
-            <button type="button" id="btnRegistrar" class="btn-cuenta-grande btn-cuenta-secundario">Registrarme</button>
-            <button type="button" id="btnIniciarSesion" class="btn-cuenta-grande">Iniciar sesión</button>
-            <p class="aviso-recuperar">¿Olvidaste tu contraseña? Contacta con el administrador del chat.</p>
-          </div>
-          <div id="cuentaConectada" class="oculto">
-            <p id="textoConectadoComo"></p>
-          </div>
-        </div>
+    <section class="landing-seccion">
+      <h3>📜 Normas de la comunidad</h3>
+      <ul class="landing-lista">
+        <li>Trata a los demás con respeto. No se permiten insultos, faltas de respeto ni discriminación por ningún motivo.</li>
+        <li>Solo se pueden compartir fotos y GIFs subidos desde tu propio dispositivo. Nada de enlaces externos ni otro tipo de archivos.</li>
+        <li>Este chat es solo para personas mayores de 18 años.</li>
+        <li>No se tolera el spam, la publicidad no solicitada, ni comportamientos de tipo bot.</li>
+        <li>Los administradores y moderadores pueden eliminar contenido, expulsar y bloquear a quien incumpla estas normas.</li>
+        <li>Si algo o alguien te incomoda, usa el botón de reportar (🚩) en el mensaje correspondiente.</li>
+      </ul>
+    </section>
 
-        <div id="panelAdmin" class="panel-admin oculto">
-          <p class="panel-admin-titulo">Panel de moderación</p>
-          <div id="seccionAsignarMod" class="form-crear-sala">
-            <input type="text" id="nickModerador" placeholder="Usuario a hacer moderador">
-            <button id="btnAsignarMod" type="button">Asignar</button>
-          </div>
-          <div class="form-crear-sala form-reset-pass">
-            <input type="text" id="usuarioResetInput" placeholder="Usuario">
-            <input type="password" id="nuevaContrasenaInput" placeholder="Nueva contraseña">
-            <button id="btnResetPass" type="button">Restablecer</button>
-          </div>
-          <div id="listaUsuariosAdmin" class="lista-usuarios-admin"></div>
+    <section class="landing-seccion">
+      <h3>⚖️ Aviso legal</h3>
+      <p>La Plaza es un proyecto de chat comunitario gestionado de forma independiente. Este aviso legal es una descripción sencilla y de buena fe de cómo funciona el servicio, no constituye asesoramiento legal profesional.</p>
+      <p>El acceso y uso de este chat implica la aceptación de estas normas. La persona administradora se reserva el derecho de moderar, suspender o eliminar cuentas y contenido que incumplan las normas de la comunidad, así como de modificar este aviso cuando sea necesario.</p>
+      <p>No nos hacemos responsables del contenido publicado por las personas usuarias, si bien se modera activamente para mantener un espacio seguro.</p>
+    </section>
 
-          <div class="barra-salas-cab" id="cabeceraBaneados">
-            <p>IPs bloqueadas</p>
-            <span class="flecha-desplegable" id="flechaBaneados">▸</span>
-          </div>
-          <div id="listaBaneadosEl" class="lista-usuarios-admin plegada"></div>
-        </div>
-      </aside>
+    <section class="landing-seccion">
+      <h3>🔒 Política de privacidad</h3>
+      <p>Para que sepas exactamente qué información se guarda:</p>
+      <ul class="landing-lista">
+        <li><strong>Si te registras:</strong> guardamos tu nombre de usuario y tu contraseña (cifrada, nunca en texto plano), y tu confirmación de mayoría de edad.</li>
+        <li><strong>Si no te registras:</strong> se te asigna un nick aleatorio temporal, sin ningún dato personal asociado.</li>
+        <li><strong>Mensajes:</strong> no se guardan de forma permanente. Las imágenes de las salas públicas se retiran de la vista general a los 3 minutos, y se conserva una copia solo para revisión de moderación durante 24 horas, tras las cuales se elimina automáticamente.</li>
+        <li><strong>Chats privados:</strong> son completamente anónimos, ni siquiera el equipo de moderación tiene acceso a ellos, y su contenido se borra al cerrar la conversación.</li>
+        <li><strong>Dirección IP:</strong> solo se registra si un administrador o moderador bloquea tu acceso por incumplir las normas, junto con la fecha y quién realizó el bloqueo.</li>
+        <li>No utilizamos cookies de rastreo ni compartimos datos con terceros con fines publicitarios.</li>
+      </ul>
+      <p>Puedes solicitar la eliminación de tu cuenta y tus datos en cualquier momento contactando con la administración del chat.</p>
+    </section>
 
-      <main class="zona-chat">
-        <div class="pestañas" id="pestañas"></div>
-        <div class="chat" id="chat"></div>
-        <p class="escribiendo-aviso" id="avisoEscribiendo"></p>
-        <form class="compositor" id="formulario">
-          <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="500">
-          <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
-          <input type="file" id="inputArchivo" accept="image/*" class="oculto">
-          <button type="submit">Enviar</button>
-        </form>
-      </main>
-
-      <aside class="barra-conectados">
-        <div class="conectados-cab">
-          <p>En esta sala</p>
-          <span id="contadorConectadosSala" class="badge-contador">0</span>
-        </div>
-        <div id="listaConectadosSala" class="lista-conectados"></div>
-      </aside>
-    </div>
+    <footer class="landing-footer">
+      <a href="/chat.html" class="landing-btn-entrar landing-btn-footer">Entrar al chat →</a>
+      <p class="landing-copy">La Plaza · Hecho con cuidado para conversar mejor.</p>
+    </footer>
   </div>
-
-  <div id="privadosContenedor" class="privados-contenedor"></div>
-
-  <script src="/socket.io/socket.io.js"></script>
-  <script src="client.js"></script>
 </body>
 </html>
