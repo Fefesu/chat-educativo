@@ -319,6 +319,20 @@ io.on('connection', (socket) => {
 
   // ---- Eliminar sala (admin o quien la creo) ----
   // ---- Banear IP (admin o moderador) ----
+  // ---- Restablecer contraseña de un usuario (admin o moderador) ----
+  socket.on('restablecerContrasena', async ({ usuario, nuevaContrasena }) => {
+    if (!esModOAdmin(socket.id)) return;
+    if (!usuariosCol) { socket.emit('error_app', 'La base de datos no esta disponible ahora mismo.'); return; }
+    const u = String(usuario || '').trim().toLowerCase();
+    const p = String(nuevaContrasena || '');
+    if (p.length < 6) { socket.emit('error_app', 'La nueva contrasena debe tener al menos 6 caracteres.'); return; }
+    const doc = await usuariosCol.findOne({ usuario: u });
+    if (!doc) { socket.emit('error_app', 'Ese usuario no existe.'); return; }
+    const hash = await bcrypt.hash(p, 10);
+    await usuariosCol.updateOne({ usuario: u }, { $set: { hash } });
+    socket.emit('avisoOk', `Contrasena de ${u} restablecida correctamente.`);
+  });
+
   socket.on('banearIP', async ({ nickObjetivo }) => {
     if (!esModOAdmin(socket.id)) return;
     const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n === nickObjetivo);
