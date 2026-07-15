@@ -42,6 +42,50 @@ const listaBaneadosEl = document.getElementById('listaBaneadosEl');
 const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
 const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true }
 
+// ---- Aviso de mensaje privado nuevo: sonido suave + parpadeo del titulo ----
+const tituloOriginal = document.title;
+let parpadeoInterval = null;
+
+function reproducirSonidoAviso() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.value = 880;
+    gain.gain.setValueAtTime(0.12, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start();
+    osc.stop(ctx.currentTime + 0.35);
+  } catch (e) { /* el navegador puede bloquear audio sin interaccion previa */ }
+}
+
+function iniciarParpadeoTitulo() {
+  if (parpadeoInterval) return;
+  let mostrandoAviso = false;
+  parpadeoInterval = setInterval(() => {
+    document.title = mostrandoAviso ? tituloOriginal : '🔔 Mensaje nuevo';
+    mostrandoAviso = !mostrandoAviso;
+  }, 1000);
+}
+
+function detenerParpadeoTitulo() {
+  if (!parpadeoInterval) return;
+  clearInterval(parpadeoInterval);
+  parpadeoInterval = null;
+  document.title = tituloOriginal;
+}
+
+window.addEventListener('focus', detenerParpadeoTitulo);
+document.addEventListener('visibilitychange', () => { if (!document.hidden) detenerParpadeoTitulo(); });
+
+function avisarMensajePrivadoNuevo() {
+  reproducirSonidoAviso();
+  if (document.hidden || !document.hasFocus()) iniciarParpadeoTitulo();
+}
+
 let miNick = null;
 let miRol = 'usuario';
 let salasDisponibles = [];
@@ -145,21 +189,19 @@ function renderMensajes() {
       div.textContent = item.texto;
     } else if (item.tipo === 'imagen') {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
-      const etiquetaRolImg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
       const cuerpoImg = item.eliminada
         ? '<p class="imagen-eliminada">🕒 Imagen eliminada tras 3 minutos</p>'
         : `<img class="imagen-chat" src="${item.imagenDataUrl}" alt="Imagen enviada por ${escapar(item.nick)}">`;
       div.innerHTML = `
-        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}${etiquetaRolImg}</div>
+        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
         ${cuerpoImg}
         <div class="hora">${item.hora}</div>
       `;
       if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, '[imagen]'));
     } else {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
-      const etiquetaRolMsg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
       div.innerHTML = `
-        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}${etiquetaRolMsg}</div>
+        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
         <div class="texto">${escapar(item.texto)}</div>
         <div class="hora">${item.hora}</div>
       `;
@@ -221,11 +263,11 @@ function renderListaSalas() {
     }
     div.appendChild(btn);
 
-    if (esPrivilegiado() || s.creador === miNick) {
+    if (s.puedeCerrar) {
       const btnBorrar = document.createElement('button');
       btnBorrar.textContent = '🗑';
       btnBorrar.className = 'btn-borrar-sala';
-      btnBorrar.title = (s.creador === miNick && !esPrivilegiado()) ? 'Cerrar tu sala' : 'Eliminar sala';
+      btnBorrar.title = esPrivilegiado() ? 'Eliminar sala' : 'Cerrar tu sala';
       btnBorrar.addEventListener('click', () => {
         if (confirm(`¿Cerrar la sala "${s.nombre}"?`)) socket.emit('eliminarSala', { salaId: s.id });
       });
@@ -580,12 +622,14 @@ socket.on('mensajePrivado', ({ canalId, nick, texto, hora }) => {
   if (!privados[canalId]) return;
   privados[canalId].mensajes.push({ nick, texto, hora, tipo: 'texto' });
   renderMensajesPrivado(canalId);
+  if (nick !== miNick) avisarMensajePrivadoNuevo();
 });
 
 socket.on('imagenPrivada', ({ canalId, nick, imagenDataUrl, hora }) => {
   if (!privados[canalId]) return;
   privados[canalId].mensajes.push({ nick, imagenDataUrl, hora, tipo: 'imagen' });
   renderMensajesPrivado(canalId);
+  if (nick !== miNick) avisarMensajePrivadoNuevo();
 });
 
 socket.on('privadoCerrado', ({ canalId, motivo }) => {
