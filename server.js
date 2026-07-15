@@ -7,7 +7,7 @@ const bcrypt = require('bcryptjs');
 
 const app = express();
 const server = http.createServer(app);
-const io = new Server(server);
+const io = new Server(server, { maxHttpBufferSize: 5 * 1024 * 1024 });
 
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -15,7 +15,16 @@ app.use(express.static(path.join(__dirname, 'public')));
 const MAX_SALAS = 10;
 const MAX_SALAS_POR_USUARIO = 3;
 const MAX_MODERADORES = 5;
+const MAX_PRIVADOS_POR_USUARIO = 2;
+const MAX_TAMANO_IMAGEN = 4 * 1024 * 1024; // 4MB en base64
 const ADMIN_KEY = process.env.ADMIN_KEY || 'CAMBIA-ESTA-CLAVE';
+
+// Copia de las imagenes de las salas publicas para moderacion (24h) - no se usa para privados
+const imagenesModeracion = new Map(); // id -> { dataUrl, nick, salaId, fecha }
+
+function esImagenValida(dataUrl) {
+  return typeof dataUrl === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|svg\+xml);base64,/.test(dataUrl) && dataUrl.length <= MAX_TAMANO_IMAGEN;
+}
 
 // ---- Palabras para nicks aleatorios (usuarios no registrados) ----
 const ADJETIVOS = ['Curioso', 'Sereno', 'Amable', 'Despierto', 'Ligero', 'Sabio', 'Alegre', 'Tranquilo'];
@@ -146,6 +155,7 @@ io.on('connection', (socket) => {
   const nick = generarNick();
   usuariosConectados.set(socket.id, nick);
   socket.data.salasUnidas = new Set();
+  socket.data.privados = new Map(); // otroNick -> canalId
   socket.data.registrado = false;
 
   socket.emit('bienvenida', { nick, totalConectados: usuariosConectados.size, salas: listaSalas() });
@@ -242,7 +252,7 @@ io.on('connection', (socket) => {
   });
 
   // ---- Mensaje en una sala ----
-  socket.on('mensajeSala', ({ salaId, texto }) => {
+  socket.on('mensajeSala', ({ salaId, texto, imagenDataUrl, imagenNombre }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
     const privilegiado = esModOAdmin(socket.id);
@@ -253,18 +263,31 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const nick = usuariosConectados.get(socket.id);
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
+    if (imagenDataUrl) {
+      if (!esImagenValida(imagenDataUrl)) {
+        socket.emit('error_app', 'Solo se permiten imagenes (foto o GIF) de hasta 4MB.');
+        return;
+      }
+      const id = 'img_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+      imagenesModeracion.set(id, { dataUrl: imagenDataUrl, nick, salaId, fecha: Date.now() });
+      setTimeout(() => imagenesModeracion.delete(id), 24 * 60 * 60 * 1000);
+
+      const msg = { salaId, id, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'imagen', imagenDataUrl, imagenNombre: String(imagenNombre || 'imagen'), hora };
+      io.to(salaId).emit('mensajeSala', msg);
+      const espectadores = [adminSocketId, ...moderadores].filter(sid => sid && !sala.usuarios.has(sid));
+      espectadores.forEach(sid => io.to(sid).emit('mensajeSala', msg));
+      socket.emit('sistema', { texto: 'Tu imagen se retira de la vista en 3 minutos. Se guarda una copia solo para moderacion durante 24h.' });
+      return;
+    }
+
     let textoLimpio = String(texto || '').trim().slice(0, 500);
     if (!textoLimpio) return;
     if (contieneMalasPalabras(textoLimpio)) textoLimpio = censurar(textoLimpio);
 
-    const msg = {
-      salaId,
-      nick: usuariosConectados.get(socket.id),
-      rol: rolDe(socket.id),
-      registrado: !!socket.data.registrado,
-      texto: textoLimpio,
-      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-    };
+    const msg = { salaId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
     io.to(salaId).emit('mensajeSala', msg);
     const espectadores = [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id));
     espectadores.forEach(id => io.to(id).emit('mensajeSala', msg));
@@ -350,6 +373,72 @@ io.on('connection', (socket) => {
     io.emit('sistema', { texto: `${nickObjetivo} ha sido bloqueado del chat` });
   });
 
+  // ---- Chats privados (100% anonimos, ni siquiera admin/mod los ven) ----
+  function socketPorNick(nickBuscado) {
+    const entrada = Array.from(usuariosConectados.entries()).find(([, n]) => n === nickBuscado);
+    return entrada ? io.sockets.sockets.get(entrada[0]) : null;
+  }
+
+  socket.on('abrirPrivado', ({ nickObjetivo }) => {
+    const miNick = usuariosConectados.get(socket.id);
+    if (!nickObjetivo || nickObjetivo === miNick) return;
+    if (socket.data.privados.has(nickObjetivo)) {
+      const canalExistente = socket.data.privados.get(nickObjetivo);
+      socket.emit('privadoAbierto', { canalId: canalExistente, conNick: nickObjetivo });
+      return;
+    }
+    const otro = socketPorNick(nickObjetivo);
+    if (!otro) { socket.emit('error_app', 'Ese usuario ya no esta conectado.'); return; }
+    if (socket.data.privados.size >= MAX_PRIVADOS_POR_USUARIO) {
+      socket.emit('error_app', `Solo puedes tener ${MAX_PRIVADOS_POR_USUARIO} chats privados a la vez.`);
+      return;
+    }
+    if (otro.data.privados.size >= MAX_PRIVADOS_POR_USUARIO) {
+      socket.emit('error_app', `${nickObjetivo} ya tiene ${MAX_PRIVADOS_POR_USUARIO} chats privados abiertos ahora mismo.`);
+      return;
+    }
+    const canalId = 'priv_' + [miNick, nickObjetivo].sort().join('_').replace(/[^a-zA-Z0-9_]/g, '');
+    socket.join(canalId);
+    otro.join(canalId);
+    socket.data.privados.set(nickObjetivo, canalId);
+    otro.data.privados.set(miNick, canalId);
+    socket.emit('privadoAbierto', { canalId, conNick: nickObjetivo });
+    otro.emit('privadoAbierto', { canalId, conNick: miNick });
+  });
+
+  socket.on('mensajePrivado', ({ canalId, texto }) => {
+    if (!socket.rooms.has(canalId)) return;
+    const textoLimpio = String(texto || '').trim().slice(0, 500);
+    if (!textoLimpio) return;
+    io.to(canalId).emit('mensajePrivado', {
+      canalId, nick: usuariosConectados.get(socket.id), texto: textoLimpio,
+      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    });
+  });
+
+  socket.on('imagenPrivada', ({ canalId, imagenDataUrl, imagenNombre }) => {
+    if (!socket.rooms.has(canalId)) return;
+    if (!esImagenValida(imagenDataUrl)) { socket.emit('error_app', 'Solo se permiten imagenes (foto o GIF) de hasta 4MB.'); return; }
+    io.to(canalId).emit('imagenPrivada', {
+      canalId, nick: usuariosConectados.get(socket.id), imagenDataUrl, imagenNombre: String(imagenNombre || 'imagen'),
+      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    });
+    // No se guarda ninguna copia: el privado es 100% anonimo y se borra al cerrarse.
+  });
+
+  function cerrarPrivadoInterno(socketOrigen, canalId, motivo) {
+    const miNickOrigen = usuariosConectados.get(socketOrigen.id);
+    let otroNick = null;
+    socketOrigen.data.privados.forEach((c, nick) => { if (c === canalId) otroNick = nick; });
+    socketOrigen.leave(canalId);
+    if (otroNick) socketOrigen.data.privados.delete(otroNick);
+    io.to(canalId).emit('privadoCerrado', { canalId, motivo: motivo || 'cerrado', porQuien: miNickOrigen });
+    const otro = otroNick ? socketPorNick(otroNick) : null;
+    if (otro) { otro.leave(canalId); otro.data.privados.delete(miNickOrigen); }
+  }
+
+  socket.on('cerrarPrivado', ({ canalId }) => cerrarPrivadoInterno(socket, canalId, 'cerrado'));
+
   socket.on('eliminarSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
@@ -374,6 +463,9 @@ io.on('connection', (socket) => {
   // ---- Desconexion ----
   socket.on('disconnect', () => {
     const nickSaliente = usuariosConectados.get(socket.id);
+    Array.from(socket.data.privados.values()).forEach(canalId => {
+      io.to(canalId).emit('privadoCerrado', { canalId, motivo: 'desconexion', porQuien: nickSaliente });
+    });
     usuariosConectados.delete(socket.id);
     salas.forEach(sala => {
       if (sala.usuarios.has(socket.id)) {
