@@ -47,7 +47,14 @@ async function conectarDB() {
   const cliente = new MongoClient(process.env.MONGODB_URI);
   await cliente.connect();
   usuariosCol = cliente.db('chat_educativo').collection('usuarios');
-  await usuariosCol.createIndex({ usuario: 1 }, { unique: true });
+
+  // Migracion: las cuentas creadas antes de este cambio no tienen "usuarioClave" todavia
+  const antiguas = await usuariosCol.find({ usuarioClave: { $exists: false } }).toArray();
+  for (const doc of antiguas) {
+    await usuariosCol.updateOne({ _id: doc._id }, { $set: { usuarioClave: doc.usuario.toLowerCase() } });
+  }
+
+  await usuariosCol.createIndex({ usuarioClave: 1 }, { unique: true });
   baneadosCol = cliente.db('chat_educativo').collection('baneados');
   await baneadosCol.createIndex({ ip: 1 }, { unique: true });
   await cargarBaneados();
@@ -166,10 +173,11 @@ io.on('connection', (socket) => {
   socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El registro no esta disponible ahora mismo.'); return; }
     if (!mayorDeEdad) { socket.emit('error_app', 'Debes confirmar que eres mayor de 18 años para registrarte.'); return; }
-    const u = String(usuario || '').trim().toLowerCase();
+    const u = String(usuario || '').trim();
+    const uClave = u.toLowerCase();
     const p = String(contrasena || '');
-    if (!/^[a-z0-9_]{3,20}$/.test(u)) {
-      socket.emit('error_app', 'El nombre de usuario debe tener entre 3 y 20 letras/numeros, sin espacios.');
+    if (!/^[a-zA-Z0-9_.-]{3,20}$/.test(u)) {
+      socket.emit('error_app', 'El usuario debe tener 3-20 caracteres: letras, numeros, guion (-), guion bajo (_) o punto (.), sin espacios.');
       return;
     }
     if (p.length < 6) {
@@ -178,12 +186,12 @@ io.on('connection', (socket) => {
     }
     try {
       const hash = await bcrypt.hash(p, 10);
-      await usuariosCol.insertOne({ usuario: u, hash, rol: 'usuario', mayorDeEdad: true, creado: new Date() });
+      await usuariosCol.insertOne({ usuario: u, usuarioClave: uClave, hash, rol: 'usuario', mayorDeEdad: true, creado: new Date() });
       aplicarSesion(socket, u, 'usuario');
       socket.emit('sesionIniciada', { usuario: u, rol: 'usuario' });
       io.emit('sistema', { texto: `${u} se ha registrado` });
     } catch (err) {
-      if (err.code === 11000) socket.emit('error_app', 'Ese nombre de usuario ya existe.');
+      if (err.code === 11000) socket.emit('error_app', 'Ese nombre de usuario ya existe (no distingue mayusculas de minusculas).');
       else socket.emit('error_app', 'No se pudo completar el registro.');
     }
   });
@@ -191,8 +199,8 @@ io.on('connection', (socket) => {
   // ---- Inicio de sesion ----
   socket.on('iniciarSesion', async ({ usuario, contrasena }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El inicio de sesion no esta disponible ahora mismo.'); return; }
-    const u = String(usuario || '').trim().toLowerCase();
-    const doc = await usuariosCol.findOne({ usuario: u });
+    const uClave = String(usuario || '').trim().toLowerCase();
+    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
     if (!doc) { socket.emit('error_app', 'Usuario o contrasena incorrectos.'); return; }
     const ok = await bcrypt.compare(String(contrasena || ''), doc.hash);
     if (!ok) { socket.emit('error_app', 'Usuario o contrasena incorrectos.'); return; }
@@ -308,25 +316,32 @@ io.on('connection', (socket) => {
   socket.on('asignarModerador', async ({ nickObjetivo }) => {
     if (socket.id !== adminSocketId) return;
     if (moderadores.size >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
-    const u = String(nickObjetivo || '').trim().toLowerCase();
+    const uClave = String(nickObjetivo || '').trim().toLowerCase();
+    let nombreReal = nickObjetivo;
     if (usuariosCol) {
-      const doc = await usuariosCol.findOne({ usuario: u });
+      const doc = await usuariosCol.findOne({ usuarioClave: uClave });
       if (!doc) { socket.emit('error_app', 'Ese usuario no esta registrado.'); return; }
-      await usuariosCol.updateOne({ usuario: u }, { $set: { rol: 'moderador' } });
+      nombreReal = doc.usuario;
+      await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { rol: 'moderador' } });
     }
-    const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n === u);
+    const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n.toLowerCase() === uClave);
     if (destino) { moderadores.add(destino[0]); io.to(destino[0]).emit('rolAsignado', { rol: 'moderador' }); }
-    io.emit('sistema', { texto: `${u} es ahora moderador` });
+    io.emit('sistema', { texto: `${nombreReal} es ahora moderador` });
   });
 
   // ---- Quitar moderador (solo admin) ----
   socket.on('quitarModerador', async ({ nickObjetivo }) => {
     if (socket.id !== adminSocketId) return;
-    const u = String(nickObjetivo || '').trim().toLowerCase();
-    if (usuariosCol) await usuariosCol.updateOne({ usuario: u }, { $set: { rol: 'usuario' } });
-    const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n === u);
+    const uClave = String(nickObjetivo || '').trim().toLowerCase();
+    let nombreReal = nickObjetivo;
+    if (usuariosCol) {
+      const doc = await usuariosCol.findOne({ usuarioClave: uClave });
+      if (doc) nombreReal = doc.usuario;
+      await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { rol: 'usuario' } });
+    }
+    const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n.toLowerCase() === uClave);
     if (destino) { moderadores.delete(destino[0]); io.to(destino[0]).emit('rolAsignado', { rol: 'usuario' }); }
-    io.emit('sistema', { texto: `${u} ya no es moderador` });
+    io.emit('sistema', { texto: `${nombreReal} ya no es moderador` });
   });
 
   // ---- Indicador de "esta escribiendo" ----
@@ -346,14 +361,14 @@ io.on('connection', (socket) => {
   socket.on('restablecerContrasena', async ({ usuario, nuevaContrasena }) => {
     if (!esModOAdmin(socket.id)) return;
     if (!usuariosCol) { socket.emit('error_app', 'La base de datos no esta disponible ahora mismo.'); return; }
-    const u = String(usuario || '').trim().toLowerCase();
+    const uClave = String(usuario || '').trim().toLowerCase();
     const p = String(nuevaContrasena || '');
     if (p.length < 6) { socket.emit('error_app', 'La nueva contrasena debe tener al menos 6 caracteres.'); return; }
-    const doc = await usuariosCol.findOne({ usuario: u });
+    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
     if (!doc) { socket.emit('error_app', 'Ese usuario no existe.'); return; }
     const hash = await bcrypt.hash(p, 10);
-    await usuariosCol.updateOne({ usuario: u }, { $set: { hash } });
-    socket.emit('avisoOk', `Contrasena de ${u} restablecida correctamente.`);
+    await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { hash } });
+    socket.emit('avisoOk', `Contrasena de ${doc.usuario} restablecida correctamente.`);
   });
 
   socket.on('banearIP', async ({ nickObjetivo }) => {
