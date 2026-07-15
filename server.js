@@ -76,7 +76,7 @@ function esModOAdmin(socketId) {
 
 function listaSalas() {
   return Array.from(salas.values()).map(s => ({
-    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente
+    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, creador: s.creador
   }));
 }
 
