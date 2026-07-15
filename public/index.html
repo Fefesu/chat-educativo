@@ -19,7 +19,11 @@
       <p class="landing-eyebrow">Un espacio de conversación</p>
       <h2>Educación, respeto y buen humor, ante todo.</h2>
       <p class="landing-subtexto">Salas de chat en tiempo real, abiertas a todo el mundo. Antes de entrar, tómate un minuto para leer cómo funciona esto.</p>
-      <a href="/chat.html" class="landing-btn-entrar">Entrar al chat →</a>
+      <label class="landing-checkbox">
+        <input type="checkbox" id="aceptoNormas">
+        <span>He leído y acepto las normas de la comunidad</span>
+      </label>
+      <button type="button" class="landing-btn-entrar btn-entrar-condicional" disabled>Entrar al chat →</button>
     </section>
 
     <section class="landing-seccion">
@@ -56,9 +60,20 @@
     </section>
 
     <footer class="landing-footer">
-      <a href="/chat.html" class="landing-btn-entrar landing-btn-footer">Entrar al chat →</a>
+      <button type="button" class="landing-btn-entrar landing-btn-footer btn-entrar-condicional" disabled>Entrar al chat →</button>
       <p class="landing-copy">La Plaza · Hecho con cuidado para conversar mejor.</p>
     </footer>
   </div>
+
+  <script>
+    const casillaNormas = document.getElementById('aceptoNormas');
+    const botonesEntrar = document.querySelectorAll('.btn-entrar-condicional');
+    casillaNormas.addEventListener('change', () => {
+      botonesEntrar.forEach(b => { b.disabled = !casillaNormas.checked; });
+    });
+    botonesEntrar.forEach(b => b.addEventListener('click', () => {
+      if (!b.disabled) window.location.href = '/chat.html';
+    }));
+  </script>
 </body>
 </html>
