@@ -17,6 +17,9 @@ const MAX_SALAS_POR_USUARIO = 3;
 const MAX_MODERADORES = 5;
 const MAX_PRIVADOS_POR_USUARIO = 2;
 const MAX_TAMANO_IMAGEN = 4 * 1024 * 1024; // 4MB en base64
+const MAX_INTENTOS_LOGIN = 3;
+const BLOQUEO_LOGIN_MS = 15 * 60 * 1000;
+const intentosLogin = new Map(); // usuarioClave -> { intentos, bloqueadoHasta }
 const ADMIN_KEY = process.env.ADMIN_KEY || 'CAMBIA-ESTA-CLAVE';
 
 // Copia de las imagenes de las salas publicas para moderacion (24h) - no se usa para privados
@@ -200,11 +203,34 @@ io.on('connection', (socket) => {
   socket.on('iniciarSesion', async ({ usuario, contrasena }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El inicio de sesion no esta disponible ahora mismo.'); return; }
     const uClave = String(usuario || '').trim().toLowerCase();
-    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
-    if (!doc) { socket.emit('error_app', 'Usuario o contrasena incorrectos.'); return; }
-    const ok = await bcrypt.compare(String(contrasena || ''), doc.hash);
-    if (!ok) { socket.emit('error_app', 'Usuario o contrasena incorrectos.'); return; }
 
+    const bloqueo = intentosLogin.get(uClave);
+    if (bloqueo && bloqueo.bloqueadoHasta && Date.now() < bloqueo.bloqueadoHasta) {
+      const minutosRestantes = Math.ceil((bloqueo.bloqueadoHasta - Date.now()) / 60000);
+      socket.emit('error_app', `Demasiados intentos fallidos. Espera ${minutosRestantes} minuto(s) antes de volver a intentarlo.`);
+      return;
+    }
+
+    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
+    const ok = doc && await bcrypt.compare(String(contrasena || ''), doc.hash);
+
+    if (!ok) {
+      const actual = intentosLogin.get(uClave) || { intentos: 0, bloqueadoHasta: null };
+      actual.intentos += 1;
+      if (actual.intentos >= MAX_INTENTOS_LOGIN) {
+        actual.bloqueadoHasta = Date.now() + BLOQUEO_LOGIN_MS;
+        actual.intentos = 0;
+        intentosLogin.set(uClave, actual);
+        socket.emit('error_app', 'Demasiados intentos fallidos. Esta cuenta se bloquea 15 minutos por seguridad.');
+      } else {
+        intentosLogin.set(uClave, actual);
+        const restantes = MAX_INTENTOS_LOGIN - actual.intentos;
+        socket.emit('error_app', `Usuario o contrasena incorrectos. Te queda${restantes === 1 ? '' : 'n'} ${restantes} intento${restantes === 1 ? '' : 's'} antes de un bloqueo temporal.`);
+      }
+      return;
+    }
+
+    intentosLogin.delete(uClave);
     aplicarSesion(socket, doc.usuario, doc.rol);
     socket.emit('sesionIniciada', { usuario: doc.usuario, rol: doc.rol });
     io.emit('sistema', { texto: `${doc.usuario} ha iniciado sesion` });
@@ -476,6 +502,17 @@ io.on('connection', (socket) => {
   }
 
   socket.on('cerrarPrivado', ({ canalId }) => cerrarPrivadoInterno(socket, canalId, 'cerrado'));
+
+  // ---- Reportar mensaje (cualquier usuario) ----
+  socket.on('reportarMensaje', ({ salaId, nickReportado, texto }) => {
+    const sala = salas.get(salaId);
+    const nombreSala = sala ? sala.nombre : salaId;
+    const quienReporta = usuariosConectados.get(socket.id);
+    const resumen = String(texto || '').slice(0, 120);
+    const aviso = `🚩 ${quienReporta} reportó a ${nickReportado} en "${nombreSala}": "${resumen}"`;
+    [adminSocketId, ...moderadores].filter(Boolean).forEach(id => io.to(id).emit('sistema', { texto: aviso }));
+    socket.emit('avisoOk', 'Gracias, tu reporte se ha enviado a los moderadores.');
+  });
 
   socket.on('eliminarSala', ({ salaId }) => {
     const sala = salas.get(salaId);
