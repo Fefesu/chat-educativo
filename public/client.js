@@ -32,8 +32,12 @@ const mayorEdadInput = document.getElementById('mayorEdadInput');
 const seccionAsignarMod = document.getElementById('seccionAsignarMod');
 const listaConectadosSala = document.getElementById('listaConectadosSala');
 const contadorConectadosSala = document.getElementById('contadorConectadosSala');
+const btnAdjuntar = document.getElementById('btnAdjuntar');
+const inputArchivo = document.getElementById('inputArchivo');
+const privadosContenedor = document.getElementById('privadosContenedor');
 
 const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
+const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true }
 
 let miNick = null;
 let miRol = 'usuario';
@@ -123,6 +127,17 @@ function renderMensajes() {
     if (item.tipo === 'sistema') {
       div.className = 'sistema';
       div.textContent = item.texto;
+    } else if (item.tipo === 'imagen') {
+      div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
+      const etiquetaRolImg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
+      const cuerpoImg = item.eliminada
+        ? '<p class="imagen-eliminada">🕒 Imagen eliminada tras 3 minutos</p>'
+        : `<img class="imagen-chat" src="${item.imagenDataUrl}" alt="Imagen enviada por ${escapar(item.nick)}">`;
+      div.innerHTML = `
+        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}${etiquetaRolImg}</div>
+        ${cuerpoImg}
+        <div class="hora">${item.hora}</div>
+      `;
     } else {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       const etiquetaRolMsg = item.rol && item.rol !== 'usuario' ? ` · ${item.rol}` : '';
@@ -154,6 +169,12 @@ function renderListaConectadosSala() {
     const div = document.createElement('div');
     div.className = 'item-conectado';
     div.innerHTML = `<span class="punto-conexion online"></span><span style="color:${colorDeNick(n)}">${escapar(n)}</span>`;
+    if (n !== miNick) {
+      div.addEventListener('click', () => socket.emit('abrirPrivado', { nickObjetivo: n }));
+    } else {
+      div.style.cursor = 'default';
+      div.style.opacity = '0.7';
+    }
     listaConectadosSala.appendChild(div);
   });
 }
@@ -261,6 +282,12 @@ socket.on('mensajeSala', (msg) => {
   if (!mensajesPorSala[msg.salaId]) mensajesPorSala[msg.salaId] = [];
   mensajesPorSala[msg.salaId].push(msg);
   if (escribiendoPorSala[msg.salaId]) escribiendoPorSala[msg.salaId].delete(msg.nick);
+  if (msg.tipo === 'imagen') {
+    setTimeout(() => {
+      msg.eliminada = true;
+      if (msg.salaId === salaActiva) renderMensajes();
+    }, 3 * 60 * 1000);
+  }
   if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
 });
 
@@ -402,4 +429,123 @@ btnIniciarSesion.addEventListener('click', () => {
   const contrasena = contrasenaInput.value;
   if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
   socket.emit('iniciarSesion', { usuario, contrasena });
+});
+
+// ---- Subida de imagenes (fotos y GIFs desde el propio dispositivo) ----
+function manejarArchivoSeleccionado(file, destino) {
+  if (!file.type.startsWith('image/')) { alert('Solo se permiten imagenes (foto en cualquier formato) o GIFs.'); return; }
+  if (file.size > 4 * 1024 * 1024) { alert('La imagen pesa demasiado (maximo 4MB).'); return; }
+  const lector = new FileReader();
+  lector.onload = () => {
+    const dataUrl = lector.result;
+    if (destino.tipo === 'sala') {
+      if (!salaActiva) { alert('Entra en una sala antes de enviar una imagen.'); return; }
+      socket.emit('mensajeSala', { salaId: salaActiva, imagenDataUrl: dataUrl, imagenNombre: file.name });
+    } else {
+      socket.emit('imagenPrivada', { canalId: destino.canalId, imagenDataUrl: dataUrl, imagenNombre: file.name });
+    }
+  };
+  lector.readAsDataURL(file);
+}
+
+btnAdjuntar.addEventListener('click', () => inputArchivo.click());
+inputArchivo.addEventListener('change', () => {
+  if (inputArchivo.files[0]) manejarArchivoSeleccionado(inputArchivo.files[0], { tipo: 'sala' });
+  inputArchivo.value = '';
+});
+
+// ---- Chats privados (ventanas flotantes, maximo 2 a la vez) ----
+function renderMensajesPrivado(canalId) {
+  const cont = document.getElementById(`chatPrivado_${canalId}`);
+  const p = privados[canalId];
+  if (!cont || !p) return;
+  cont.innerHTML = '';
+  p.mensajes.forEach(m => {
+    const div = document.createElement('div');
+    div.className = 'msg-privado' + (m.nick === miNick ? ' propio' : '');
+    const cuerpo = m.tipo === 'imagen'
+      ? `<img src="${m.imagenDataUrl}" alt="Imagen privada">`
+      : `<div>${escapar(m.texto)}</div>`;
+    div.innerHTML = `<div class="nick-privado" style="color:${colorDeNick(m.nick)}">${escapar(m.nick)}</div>${cuerpo}<div class="hora">${m.hora}</div>`;
+    cont.appendChild(div);
+  });
+  cont.scrollTop = cont.scrollHeight;
+}
+
+function renderPrivados() {
+  privadosContenedor.innerHTML = '';
+  Object.keys(privados).forEach(canalId => {
+    const p = privados[canalId];
+    const div = document.createElement('div');
+    div.className = 'ventana-privado';
+    div.innerHTML = `
+      <div class="ventana-privado-cab">
+        <span>${escapar(p.conNick)}${p.conectado ? '' : ' <span class="estado-privado">(desconectado)</span>'}</span>
+        <button type="button" class="btn-cerrar-privado">✕</button>
+      </div>
+      <div class="ventana-privado-chat" id="chatPrivado_${canalId}"></div>
+      <div class="ventana-privado-input">
+        <input type="text" placeholder="Mensaje privado..." ${p.conectado ? '' : 'disabled'}>
+        <button type="button" class="btn-foto-privado" ${p.conectado ? '' : 'disabled'}>📷</button>
+        <button type="button" class="btn-enviar-privado" ${p.conectado ? '' : 'disabled'}>➤</button>
+      </div>
+    `;
+    privadosContenedor.appendChild(div);
+    renderMensajesPrivado(canalId);
+
+    div.querySelector('.btn-cerrar-privado').addEventListener('click', () => {
+      socket.emit('cerrarPrivado', { canalId });
+      delete privados[canalId];
+      renderPrivados();
+    });
+
+    const inputP = div.querySelector('input[type="text"]');
+    const enviar = () => {
+      const texto = inputP.value.trim();
+      if (!texto) return;
+      socket.emit('mensajePrivado', { canalId, texto });
+      inputP.value = '';
+    };
+    div.querySelector('.btn-enviar-privado').addEventListener('click', enviar);
+    inputP.addEventListener('keydown', (e) => { if (e.key === 'Enter') enviar(); });
+
+    div.querySelector('.btn-foto-privado').addEventListener('click', () => {
+      const inputTemp = document.createElement('input');
+      inputTemp.type = 'file';
+      inputTemp.accept = 'image/*';
+      inputTemp.addEventListener('change', () => {
+        if (inputTemp.files[0]) manejarArchivoSeleccionado(inputTemp.files[0], { tipo: 'privado', canalId });
+      });
+      inputTemp.click();
+    });
+  });
+}
+
+socket.on('privadoAbierto', ({ canalId, conNick }) => {
+  if (!privados[canalId]) privados[canalId] = { conNick, mensajes: [], conectado: true };
+  renderPrivados();
+});
+
+socket.on('mensajePrivado', ({ canalId, nick, texto, hora }) => {
+  if (!privados[canalId]) return;
+  privados[canalId].mensajes.push({ nick, texto, hora, tipo: 'texto' });
+  renderMensajesPrivado(canalId);
+});
+
+socket.on('imagenPrivada', ({ canalId, nick, imagenDataUrl, hora }) => {
+  if (!privados[canalId]) return;
+  privados[canalId].mensajes.push({ nick, imagenDataUrl, hora, tipo: 'imagen' });
+  renderMensajesPrivado(canalId);
+});
+
+socket.on('privadoCerrado', ({ canalId, motivo }) => {
+  if (!privados[canalId]) return;
+  if (motivo === 'desconexion') {
+    privados[canalId].conectado = false;
+    renderPrivados();
+    setTimeout(() => { delete privados[canalId]; renderPrivados(); }, 5000);
+  } else {
+    delete privados[canalId];
+    renderPrivados();
+  }
 });

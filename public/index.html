@@ -74,6 +74,8 @@
         <p class="escribiendo-aviso" id="avisoEscribiendo"></p>
         <form class="compositor" id="formulario">
           <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="500">
+          <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
+          <input type="file" id="inputArchivo" accept="image/*" class="oculto">
           <button type="submit">Enviar</button>
         </form>
       </main>
@@ -87,6 +89,8 @@
       </aside>
     </div>
   </div>
+
+  <div id="privadosContenedor" class="privados-contenedor"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="client.js"></script>
