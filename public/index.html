@@ -46,6 +46,7 @@
             </label>
             <button type="button" id="btnRegistrar" class="btn-cuenta-grande btn-cuenta-secundario">Registrarme</button>
             <button type="button" id="btnIniciarSesion" class="btn-cuenta-grande">Iniciar sesión</button>
+            <p class="aviso-recuperar">¿Olvidaste tu contraseña? Contacta con el administrador del chat.</p>
           </div>
           <div id="cuentaConectada" class="oculto">
             <p id="textoConectadoComo"></p>
@@ -57,6 +58,11 @@
           <div id="seccionAsignarMod" class="form-crear-sala">
             <input type="text" id="nickModerador" placeholder="Usuario a hacer moderador">
             <button id="btnAsignarMod" type="button">Asignar</button>
+          </div>
+          <div class="form-crear-sala form-reset-pass">
+            <input type="text" id="usuarioResetInput" placeholder="Usuario">
+            <input type="password" id="nuevaContrasenaInput" placeholder="Nueva contraseña">
+            <button id="btnResetPass" type="button">Restablecer</button>
           </div>
           <div id="listaUsuariosAdmin" class="lista-usuarios-admin"></div>
         </div>

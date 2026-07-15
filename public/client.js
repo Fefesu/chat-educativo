@@ -15,6 +15,9 @@ const btnAdmin = document.getElementById('btnAdmin');
 const etiquetaRol = document.getElementById('etiquetaRol');
 const panelAdmin = document.getElementById('panelAdmin');
 const btnAsignarMod = document.getElementById('btnAsignarMod');
+const usuarioResetInput = document.getElementById('usuarioResetInput');
+const nuevaContrasenaInput = document.getElementById('nuevaContrasenaInput');
+const btnResetPass = document.getElementById('btnResetPass');
 const nickModeradorInput = document.getElementById('nickModerador');
 const listaUsuariosAdmin = document.getElementById('listaUsuariosAdmin');
 const usuarioInput = document.getElementById('usuarioInput');
@@ -275,6 +278,7 @@ socket.on('sistema', ({ texto }) => {
 });
 
 socket.on('error_app', (texto) => alert(texto));
+socket.on('avisoOk', (texto) => alert(texto));
 
 socket.on('rolAsignado', ({ rol }) => {
   miRol = rol;
@@ -374,6 +378,15 @@ btnAsignarMod.addEventListener('click', () => {
   if (!nickObjetivo) return;
   socket.emit('asignarModerador', { nickObjetivo });
   nickModeradorInput.value = '';
+});
+
+btnResetPass.addEventListener('click', () => {
+  const usuario = usuarioResetInput.value.trim();
+  const nuevaContrasena = nuevaContrasenaInput.value;
+  if (!usuario || !nuevaContrasena) { alert('Rellena el usuario y la nueva contrasena.'); return; }
+  socket.emit('restablecerContrasena', { usuario, nuevaContrasena });
+  usuarioResetInput.value = '';
+  nuevaContrasenaInput.value = '';
 });
 
 btnRegistrar.addEventListener('click', () => {
