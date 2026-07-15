@@ -76,8 +76,20 @@ function esModOAdmin(socketId) {
 
 function listaSalas() {
   return Array.from(salas.values()).map(s => ({
-    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, creador: s.creador
+    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente
   }));
+}
+
+function listaSalasPara(socketId) {
+  const miNickActual = usuariosConectados.get(socketId);
+  return Array.from(salas.values()).map(s => ({
+    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente,
+    puedeCerrar: esModOAdmin(socketId) || s.creador === miNickActual
+  }));
+}
+
+function emitirSalasATodos() {
+  io.sockets.sockets.forEach((s) => s.emit('salasActualizadas', listaSalasPara(s.id)));
 }
 
 function usuariosDeSala(sala) {
@@ -168,7 +180,7 @@ io.on('connection', (socket) => {
   socket.data.privados = new Map(); // otroNick -> canalId
   socket.data.registrado = false;
 
-  socket.emit('bienvenida', { nick, totalConectados: usuariosConectados.size, salas: listaSalas() });
+  socket.emit('bienvenida', { nick, totalConectados: usuariosConectados.size, salas: listaSalasPara(socket.id) });
   socket.broadcast.emit('sistema', { texto: `${nick} se ha conectado` });
   io.emit('totalConectados', usuariosConectados.size);
 
@@ -243,6 +255,7 @@ io.on('connection', (socket) => {
     if (rol === 'admin') adminSocketId = socket.id;
     if (rol === 'moderador') moderadores.add(socket.id);
     io.emit('totalConectados', usuariosConectados.size);
+    emitirSalasATodos();
   }
 
   // ---- Crear sala ----
@@ -253,7 +266,7 @@ io.on('connection', (socket) => {
     const id = 'sala_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const permanente = esModOAdmin(socket.id);
     salas.set(id, { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set(), vacioDesde: permanente ? null : Date.now(), permanente });
-    io.emit('salasActualizadas', listaSalas());
+    emitirSalasATodos();
     io.emit('sistema', { texto: `${usuariosConectados.get(socket.id)} ha creado la sala "${nombreLimpio}"` });
   });
 
@@ -272,7 +285,7 @@ io.on('connection', (socket) => {
     socket.data.salasUnidas.add(salaId);
     marcarEstadoVacio(sala);
     socket.emit('unido', { salaId });
-    io.emit('salasActualizadas', listaSalas());
+    emitirSalasATodos();
     io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
   });
 
@@ -282,7 +295,7 @@ io.on('connection', (socket) => {
     socket.leave(salaId);
     socket.data.salasUnidas.delete(salaId);
     if (sala) { sala.usuarios.delete(socket.id); marcarEstadoVacio(sala); io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) }); }
-    io.emit('salasActualizadas', listaSalas());
+    emitirSalasATodos();
   });
 
   // ---- Mensaje en una sala ----
@@ -335,6 +348,7 @@ io.on('connection', (socket) => {
     adminSocketId = socket.id;
     if (usuariosCol) await usuariosCol.updateOne({ usuario: socket.data.usuario }, { $set: { rol: 'admin' } });
     socket.emit('rolAsignado', { rol: 'admin' });
+    emitirSalasATodos();
     io.emit('sistema', { texto: `${socket.data.usuario} es ahora el administrador del chat` });
   });
 
@@ -517,13 +531,24 @@ io.on('connection', (socket) => {
   socket.on('eliminarSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
-    const puedeEliminar = esModOAdmin(socket.id) || sala.creador === usuariosConectados.get(socket.id);
-    if (!puedeEliminar) { socket.emit('error_app', 'No puedes eliminar esta sala.'); return; }
+    const esCreador = sala.creador === usuariosConectados.get(socket.id);
+    const esPriv = esModOAdmin(socket.id);
+
+    if (!esPriv && !esCreador) { socket.emit('error_app', 'No puedes cerrar esta sala.'); return; }
+
+    if (!esPriv && esCreador) {
+      const hayOtrosDentro = Array.from(sala.usuarios).some(id => id !== socket.id);
+      if (hayOtrosDentro) {
+        socket.emit('error_app', 'No puedes cerrar la sala mientras haya otras personas dentro.');
+        return;
+      }
+    }
+
     salas.delete(salaId);
     io.socketsLeave(salaId);
-    io.emit('salasActualizadas', listaSalas());
+    emitirSalasATodos();
     io.emit('salaEliminada', { salaId });
-    io.emit('sistema', { texto: `La sala "${sala.nombre}" ha sido eliminada` });
+    io.emit('sistema', { texto: `La sala "${sala.nombre}" ha sido cerrada` });
   });
 
   socket.on('pedirUsuariosDeSala', ({ salaId }) => {
@@ -553,7 +578,7 @@ io.on('connection', (socket) => {
     moderadores.delete(socket.id);
     io.emit('sistema', { texto: `${nickSaliente} se ha desconectado` });
     io.emit('totalConectados', usuariosConectados.size);
-    io.emit('salasActualizadas', listaSalas());
+    emitirSalasATodos();
   });
 });
 
@@ -565,7 +590,7 @@ setInterval(() => {
   salas.forEach((sala, id) => {
     if (sala.vacioDesde && ahora - sala.vacioDesde >= 5 * 60 * 1000) {
       salas.delete(id);
-      io.emit('salasActualizadas', listaSalas());
+      emitirSalasATodos();
       io.emit('salaEliminada', { salaId: id });
       io.emit('sistema', { texto: `La sala "${sala.nombre}" se elimino por estar vacia` });
     }
