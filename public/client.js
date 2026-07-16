@@ -487,6 +487,16 @@ btnAdmin.addEventListener('click', () => {
   if (clave) socket.emit('reclamarAdmin', { clave });
 });
 
+const btnVerNormas = document.getElementById('btnVerNormas');
+const modalNormas = document.getElementById('modalNormas');
+const btnCerrarNormas = document.getElementById('btnCerrarNormas');
+
+if (btnVerNormas) {
+  btnVerNormas.addEventListener('click', () => modalNormas.classList.remove('oculto'));
+  btnCerrarNormas.addEventListener('click', () => modalNormas.classList.add('oculto'));
+  modalNormas.addEventListener('click', (e) => { if (e.target === modalNormas) modalNormas.classList.add('oculto'); });
+}
+
 cabeceraSalas.addEventListener('click', () => {
   listaSalasEl.classList.toggle('plegada');
   flechaSalas.textContent = listaSalasEl.classList.contains('plegada') ? '▸' : '▾';

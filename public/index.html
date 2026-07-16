@@ -38,6 +38,12 @@
       </ul>
     </section>
 
+    <section class="landing-seccion landing-contacto">
+      <h3>📧 ¿Necesitas contactarnos fuera del chat?</h3>
+      <p>Para casos urgentes o graves que no puedan esperar (por ejemplo, si detectas a un menor de edad o una situación de riesgo), puedes escribirnos directamente a:</p>
+      <a href="mailto:laplazaayuda@gmail.com" class="landing-email">laplazaayuda@gmail.com</a>
+    </section>
+
     <section class="landing-seccion">
       <h3>⚖️ Aviso legal</h3>
       <p>La Plaza es un proyecto de chat comunitario gestionado de forma independiente. Este aviso legal es una descripción sencilla y de buena fe de cómo funciona el servicio, no constituye asesoramiento legal profesional.</p>
@@ -56,13 +62,18 @@
         <li><strong>Dirección IP:</strong> solo se registra si un administrador o moderador bloquea tu acceso por incumplir las normas, junto con la fecha y quién realizó el bloqueo.</li>
         <li>No utilizamos cookies de rastreo ni compartimos datos con terceros con fines publicitarios.</li>
       </ul>
-      <p>Puedes solicitar la eliminación de tu cuenta y tus datos en cualquier momento contactando con la administración del chat.</p>
+      <p>Puedes solicitar la eliminación de tu cuenta y tus datos en cualquier momento escribiendo a <a href="mailto:laplazaayuda@gmail.com" class="landing-email">laplazaayuda@gmail.com</a>.</p>
     </section>
 
     <footer class="landing-footer">
       <button type="button" class="landing-btn-entrar landing-btn-footer btn-entrar-condicional" disabled>Entrar al chat →</button>
       <p class="landing-copy">La Plaza · Hecho con cuidado para conversar mejor.</p>
     </footer>
+  </div>
+
+  <div id="bocadilloAviso" class="bocadillo-aviso oculto">
+    <p>💬 Usamos un pequeño recordatorio técnico en tu navegador (nada de rastreo ni publicidad) para saber que ya leíste las normas. No se comparte con nadie.</p>
+    <button type="button" id="btnCerrarBocadillo">Vale, entendido</button>
   </div>
 
   <script>
@@ -72,8 +83,20 @@
       botonesEntrar.forEach(b => { b.disabled = !casillaNormas.checked; });
     });
     botonesEntrar.forEach(b => b.addEventListener('click', () => {
-      if (!b.disabled) window.location.href = '/chat.html';
+      if (!b.disabled) {
+        sessionStorage.setItem('normasAceptadas', '1');
+        window.location.href = '/chat.html';
+      }
     }));
+
+    const bocadillo = document.getElementById('bocadilloAviso');
+    if (!localStorage.getItem('avisoStorageVisto')) {
+      bocadillo.classList.remove('oculto');
+    }
+    document.getElementById('btnCerrarBocadillo').addEventListener('click', () => {
+      localStorage.setItem('avisoStorageVisto', '1');
+      bocadillo.classList.add('oculto');
+    });
   </script>
 </body>
 </html>

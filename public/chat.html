@@ -5,6 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>La Plaza · Chat</title>
 <link rel="stylesheet" href="style.css">
+<script>
+  if (sessionStorage.getItem('normasAceptadas') !== '1') {
+    window.location.replace('/');
+  }
+</script>
 </head>
 <body>
   <div class="app">
@@ -14,7 +19,7 @@
         <h1>La Plaza</h1>
       </div>
       <div class="cabecera-derecha">
-        <a href="/" class="btn-link" style="text-decoration:none;">Normas y privacidad</a>
+        <button type="button" id="btnVerNormas" class="btn-link">Normas y privacidad</button>
         <span class="etiqueta-rol" id="etiquetaRol"></span>
         <button class="btn-link" id="btnAdmin">Acceder como admin</button>
         <span class="estado" id="estado">
@@ -98,6 +103,47 @@
   </div>
 
   <div id="privadosContenedor" class="privados-contenedor"></div>
+
+  <div id="modalNormas" class="modal-fondo oculto">
+    <div class="modal-caja">
+      <div class="modal-cab">
+        <h2>La Plaza</h2>
+        <button type="button" id="btnCerrarNormas" class="modal-cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo">
+        <section class="landing-seccion">
+          <h3>📜 Normas de la comunidad</h3>
+          <ul class="landing-lista">
+            <li>Trata a los demás con respeto. No se permiten insultos, faltas de respeto ni discriminación por ningún motivo.</li>
+            <li>Solo se pueden compartir fotos y GIFs subidos desde tu propio dispositivo. Nada de enlaces externos ni otro tipo de archivos.</li>
+            <li>Este chat es solo para personas mayores de 18 años.</li>
+            <li>No se tolera el spam, la publicidad no solicitada, ni comportamientos de tipo bot.</li>
+            <li>Los administradores y moderadores pueden eliminar contenido, expulsar y bloquear a quien incumpla estas normas.</li>
+            <li>Si algo o alguien te incomoda, usa el botón de reportar (🚩) en el mensaje correspondiente.</li>
+          </ul>
+        </section>
+        <section class="landing-seccion landing-contacto">
+          <h3>📧 ¿Necesitas contactarnos fuera del chat?</h3>
+          <p>Para casos urgentes o graves (por ejemplo, si detectas a un menor de edad o una situación de riesgo), escríbenos a:</p>
+          <a href="mailto:laplazaayuda@gmail.com" class="landing-email">laplazaayuda@gmail.com</a>
+        </section>
+        <section class="landing-seccion">
+          <h3>⚖️ Aviso legal</h3>
+          <p>La Plaza es un proyecto de chat comunitario gestionado de forma independiente. Este aviso legal es una descripción sencilla y de buena fe de cómo funciona el servicio, no constituye asesoramiento legal profesional.</p>
+          <p>El acceso y uso de este chat implica la aceptación de estas normas. La persona administradora se reserva el derecho de moderar, suspender o eliminar cuentas y contenido que incumplan las normas de la comunidad.</p>
+        </section>
+        <section class="landing-seccion" style="border-bottom:none;">
+          <h3>🔒 Política de privacidad</h3>
+          <ul class="landing-lista">
+            <li><strong>Si te registras:</strong> guardamos tu nombre de usuario y tu contraseña cifrada, y tu confirmación de mayoría de edad.</li>
+            <li><strong>Mensajes:</strong> no se guardan de forma permanente. Las imágenes se retiran de la vista a los 3 minutos, con copia de moderación durante 24h.</li>
+            <li><strong>Chats privados:</strong> 100% anónimos, se borran al cerrarse.</li>
+            <li><strong>IP:</strong> solo se registra si eres bloqueado por incumplir las normas.</li>
+          </ul>
+        </section>
+      </div>
+    </div>
+  </div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="client.js"></script>
