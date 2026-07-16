@@ -42,6 +42,7 @@ function generarNick() {
 
 // ---- Conexion a la base de datos (guarda cuentas de forma permanente) ----
 let usuariosCol = null;
+let notasStaffCol = null;
 async function conectarDB() {
   if (!process.env.MONGODB_URI) {
     console.log('Aviso: no hay MONGODB_URI configurada. El registro de usuarios no estara disponible.');
@@ -60,6 +61,7 @@ async function conectarDB() {
   await usuariosCol.createIndex({ usuarioClave: 1 }, { unique: true });
   baneadosCol = cliente.db('chat_educativo').collection('baneados');
   await baneadosCol.createIndex({ ip: 1 }, { unique: true });
+  notasStaffCol = cliente.db('chat_educativo').collection('notasStaff');
   await cargarBaneados();
   console.log('Conectado a la base de datos correctamente');
 }
@@ -111,6 +113,19 @@ function unirseAStaff(socket) {
   socket.join('staff');
   sala.usuarios.add(socket.id);
   socket.data.salasUnidas.add('staff');
+  enviarHistorialStaff(socket);
+}
+
+async function enviarHistorialStaff(socket) {
+  if (!notasStaffCol) return;
+  try {
+    const historial = await notasStaffCol.find({}).sort({ fecha: -1 }).limit(50).toArray();
+    socket.emit('historialStaff', historial.reverse().map(n => ({
+      nick: n.nick,
+      texto: n.texto,
+      hora: new Date(n.fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+    })));
+  } catch (e) { /* silencioso: si falla, simplemente no hay historial */ }
 }
 
 function salirDeStaff(socket) {
@@ -361,6 +376,9 @@ io.on('connection', (socket) => {
     if (contieneMalasPalabras(textoLimpio)) textoLimpio = censurar(textoLimpio);
 
     const msg = { salaId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
+    if (salaId === 'staff' && notasStaffCol) {
+      notasStaffCol.insertOne({ nick, texto: textoLimpio, fecha: new Date() }).catch(() => {});
+    }
     io.to(salaId).emit('mensajeSala', msg);
     const espectadores = [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id));
     espectadores.forEach(id => io.to(id).emit('mensajeSala', msg));
@@ -380,6 +398,29 @@ io.on('connection', (socket) => {
   });
 
   // ---- Asignar moderador (solo admin, el objetivo debe estar registrado) ----
+  // ---- Crear directamente una cuenta nueva de moderador (solo admin) ----
+  socket.on('crearCuentaModerador', async ({ usuario, contrasena }) => {
+    if (socket.id !== adminSocketId) return;
+    if (!usuariosCol) { socket.emit('error_app', 'La base de datos no esta disponible ahora mismo.'); return; }
+    if (moderadores.size >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
+    const u = String(usuario || '').trim();
+    const uClave = u.toLowerCase();
+    const p = String(contrasena || '');
+    if (!/^[a-zA-Z0-9_.-]{3,20}$/.test(u)) {
+      socket.emit('error_app', 'El usuario debe tener 3-20 caracteres: letras, numeros, guion (-), guion bajo (_) o punto (.).');
+      return;
+    }
+    if (p.length < 6) { socket.emit('error_app', 'La contrasena debe tener al menos 6 caracteres.'); return; }
+    try {
+      const hash = await bcrypt.hash(p, 10);
+      await usuariosCol.insertOne({ usuario: u, usuarioClave: uClave, hash, rol: 'moderador', mayorDeEdad: true, creado: new Date() });
+      socket.emit('avisoOk', `Cuenta "${u}" creada como moderador. Dale la contrasena a esa persona para que inicie sesion con ella.`);
+    } catch (err) {
+      if (err.code === 11000) socket.emit('error_app', 'Ya existe una cuenta con ese nombre de usuario.');
+      else socket.emit('error_app', 'No se pudo crear la cuenta.');
+    }
+  });
+
   socket.on('asignarModerador', async ({ nickObjetivo }) => {
     if (socket.id !== adminSocketId) return;
     if (moderadores.size >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
