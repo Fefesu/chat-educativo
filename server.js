@@ -67,6 +67,12 @@ async function conectarDB() {
 // ---- Estado en memoria de la sesion en curso ----
 const usuariosConectados = new Map(); // socket.id -> nick actual
 const salas = new Map();              // salaId -> { id, nombre, creador, usuarios:Set(socketId) }
+
+// Sala fija, oculta y permanente solo para admin/moderadores. Nadie mas sabe que existe.
+salas.set('staff', {
+  id: 'staff', nombre: '👑 Sala Staff', creador: 'sistema',
+  usuarios: new Set(), vacioDesde: null, permanente: true, oculta: true
+});
 let adminSocketId = null;
 const moderadores = new Set();        // socketId
 
@@ -82,10 +88,13 @@ function listaSalas() {
 
 function listaSalasPara(socketId) {
   const miNickActual = usuariosConectados.get(socketId);
-  return Array.from(salas.values()).map(s => ({
-    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente,
-    puedeCerrar: esModOAdmin(socketId) || s.creador === miNickActual
-  }));
+  const privilegiado = esModOAdmin(socketId);
+  return Array.from(salas.values())
+    .filter(s => !s.oculta || privilegiado)
+    .map(s => ({
+      id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente,
+      puedeCerrar: !s.oculta && (privilegiado || s.creador === miNickActual)
+    }));
 }
 
 function emitirSalasATodos() {
@@ -94,6 +103,21 @@ function emitirSalasATodos() {
 
 function usuariosDeSala(sala) {
   return Array.from(sala.usuarios).map(id => usuariosConectados.get(id)).filter(Boolean);
+}
+
+function unirseAStaff(socket) {
+  const sala = salas.get('staff');
+  if (!sala) return;
+  socket.join('staff');
+  sala.usuarios.add(socket.id);
+  socket.data.salasUnidas.add('staff');
+}
+
+function salirDeStaff(socket) {
+  const sala = salas.get('staff');
+  if (sala) sala.usuarios.delete(socket.id);
+  socket.leave('staff');
+  socket.data.salasUnidas.delete('staff');
 }
 
 function marcarEstadoVacio(sala) {
@@ -254,6 +278,7 @@ io.on('connection', (socket) => {
     socket.data.usuario = usuario;
     if (rol === 'admin') adminSocketId = socket.id;
     if (rol === 'moderador') moderadores.add(socket.id);
+    if (rol === 'admin' || rol === 'moderador') unirseAStaff(socket);
     io.emit('totalConectados', usuariosConectados.size);
     emitirSalasATodos();
   }
@@ -262,7 +287,8 @@ io.on('connection', (socket) => {
   socket.on('crearSala', ({ nombre }) => {
     const nombreLimpio = String(nombre || '').trim().slice(0, 30);
     if (!nombreLimpio) return;
-    if (salas.size >= MAX_SALAS) { socket.emit('error_app', 'Ya existen 10 salas, el maximo permitido.'); return; }
+    const salasVisibles = Array.from(salas.values()).filter(s => !s.oculta).length;
+    if (salasVisibles >= MAX_SALAS) { socket.emit('error_app', 'Ya existen 10 salas, el maximo permitido.'); return; }
     const id = 'sala_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const permanente = esModOAdmin(socket.id);
     salas.set(id, { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set(), vacioDesde: permanente ? null : Date.now(), permanente });
@@ -346,6 +372,7 @@ io.on('connection', (socket) => {
     if (adminSocketId && adminSocketId !== socket.id) { socket.emit('error_app', 'Ya hay un administrador asignado en este chat.'); return; }
     if (clave !== ADMIN_KEY) { socket.emit('error_app', 'Clave incorrecta.'); return; }
     adminSocketId = socket.id;
+    unirseAStaff(socket);
     if (usuariosCol) await usuariosCol.updateOne({ usuario: socket.data.usuario }, { $set: { rol: 'admin' } });
     socket.emit('rolAsignado', { rol: 'admin' });
     emitirSalasATodos();
@@ -365,8 +392,14 @@ io.on('connection', (socket) => {
       await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { rol: 'moderador' } });
     }
     const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n.toLowerCase() === uClave);
-    if (destino) { moderadores.add(destino[0]); io.to(destino[0]).emit('rolAsignado', { rol: 'moderador' }); }
+    if (destino) {
+      moderadores.add(destino[0]);
+      const socketDestino = io.sockets.sockets.get(destino[0]);
+      if (socketDestino) unirseAStaff(socketDestino);
+      io.to(destino[0]).emit('rolAsignado', { rol: 'moderador' });
+    }
     io.emit('sistema', { texto: `${nombreReal} es ahora moderador` });
+    emitirSalasATodos();
   });
 
   // ---- Quitar moderador (solo admin) ----
@@ -380,8 +413,14 @@ io.on('connection', (socket) => {
       await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { rol: 'usuario' } });
     }
     const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n.toLowerCase() === uClave);
-    if (destino) { moderadores.delete(destino[0]); io.to(destino[0]).emit('rolAsignado', { rol: 'usuario' }); }
+    if (destino) {
+      moderadores.delete(destino[0]);
+      const socketDestino = io.sockets.sockets.get(destino[0]);
+      if (socketDestino) salirDeStaff(socketDestino);
+      io.to(destino[0]).emit('rolAsignado', { rol: 'usuario' });
+    }
     io.emit('sistema', { texto: `${nombreReal} ya no es moderador` });
+    emitirSalasATodos();
   });
 
   // ---- Indicador de "esta escribiendo" ----
@@ -531,6 +570,7 @@ io.on('connection', (socket) => {
   socket.on('eliminarSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
+    if (sala.oculta) return;
     const esCreador = sala.creador === usuariosConectados.get(socket.id);
     const esPriv = esModOAdmin(socket.id);
 
