@@ -30,6 +30,10 @@ const textoConectadoComo = document.getElementById('textoConectadoComo');
 const avisoEscribiendo = document.getElementById('avisoEscribiendo');
 const mayorEdadInput = document.getElementById('mayorEdadInput');
 const seccionAsignarMod = document.getElementById('seccionAsignarMod');
+const seccionCrearMod = document.getElementById('seccionCrearMod');
+const usuarioNuevoModInput = document.getElementById('usuarioNuevoModInput');
+const contrasenaNuevoModInput = document.getElementById('contrasenaNuevoModInput');
+const btnCrearMod = document.getElementById('btnCrearMod');
 const listaConectadosSala = document.getElementById('listaConectadosSala');
 const contadorConectadosSala = document.getElementById('contadorConectadosSala');
 const btnAdjuntar = document.getElementById('btnAdjuntar');
@@ -313,6 +317,11 @@ socket.on('usuariosDeSala', ({ salaId, usuarios }) => {
   if (salaId === salaActiva) renderListaConectadosSala();
 });
 
+socket.on('historialStaff', (mensajes) => {
+  mensajesPorSala['staff'] = mensajes.map(m => ({ ...m, tipo: 'texto', salaId: 'staff' }));
+  if (salaActiva === 'staff') renderMensajes();
+});
+
 socket.on('unido', ({ salaId }) => {
   salasUnidas.add(salaId);
   salaActiva = salaId;
@@ -375,6 +384,7 @@ socket.on('rolAsignado', ({ rol }) => {
   btnAdmin.classList.toggle('oculto', rol !== 'usuario');
   panelAdmin.classList.toggle('oculto', !esPrivilegiado());
   seccionAsignarMod.classList.toggle('oculto', rol !== 'admin');
+  seccionCrearMod.classList.toggle('oculto', rol !== 'admin');
   if (esPrivilegiado()) socket.emit('pedirUsuarios');
   renderListaSalas();
   renderPestañas();
@@ -448,6 +458,7 @@ socket.on('sesionIniciada', ({ usuario, rol }) => {
     etiquetaRol.textContent = rol === 'admin' ? '👑 Administrador' : '🛡️ Moderador';
     panelAdmin.classList.remove('oculto');
     seccionAsignarMod.classList.toggle('oculto', rol !== 'admin');
+  seccionCrearMod.classList.toggle('oculto', rol !== 'admin');
     socket.emit('pedirUsuarios');
   }
   btnAdmin.classList.toggle('oculto', rol !== 'usuario');
@@ -508,6 +519,15 @@ btnAsignarMod.addEventListener('click', () => {
   if (!nickObjetivo) return;
   socket.emit('asignarModerador', { nickObjetivo });
   nickModeradorInput.value = '';
+});
+
+btnCrearMod.addEventListener('click', () => {
+  const usuario = usuarioNuevoModInput.value.trim();
+  const contrasena = contrasenaNuevoModInput.value;
+  if (!usuario || !contrasena) { alert('Rellena el usuario y la contrasena.'); return; }
+  socket.emit('crearCuentaModerador', { usuario, contrasena });
+  usuarioNuevoModInput.value = '';
+  contrasenaNuevoModInput.value = '';
 });
 
 btnResetPass.addEventListener('click', () => {
