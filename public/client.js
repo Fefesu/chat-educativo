@@ -240,7 +240,8 @@ function renderListaConectadosSala() {
 }
 
 function renderListaSalas() {
-  contadorSalas.textContent = `(${salasDisponibles.length}/10)`;
+  const salasVisiblesCount = salasDisponibles.filter(s => s.id !== 'staff').length;
+  contadorSalas.textContent = `(${salasVisiblesCount}/10)`;
   listaSalasEl.innerHTML = '';
   salasDisponibles.forEach(s => {
     const unido = salasUnidas.has(s.id);
