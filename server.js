@@ -10,6 +10,29 @@ const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 5 * 1024 * 1024 });
 
 app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.json());
+
+function obtenerIPDesdeRequest(req) {
+  return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+}
+
+app.post('/api/apelar-baneo', async (req, res) => {
+  const ip = obtenerIPDesdeRequest(req);
+  const mensaje = String((req.body && req.body.mensaje) || '').trim().slice(0, 500);
+  if (!mensaje) return res.status(400).json({ error: 'Escribe un mensaje.' });
+  if (!baneadosCol) return res.status(503).json({ error: 'No disponible ahora mismo.' });
+
+  await baneadosCol.updateOne(
+    { ip },
+    { $push: { mensajesApelacion: { texto: mensaje, fecha: new Date() } } }
+  );
+
+  [adminSocketId, ...moderadores].filter(Boolean).forEach(id => {
+    io.to(id).emit('sistema', { texto: '📨 Alguien bloqueado ha dejado un mensaje. Revísalo en "IPs bloqueadas".' });
+  });
+
+  res.json({ ok: true });
+});
 
 // ---- Configuracion de limites ----
 const MAX_SALAS = 10;
@@ -43,6 +66,7 @@ function generarNick() {
 // ---- Conexion a la base de datos (guarda cuentas de forma permanente) ----
 let usuariosCol = null;
 let notasStaffCol = null;
+let estadisticasCol = null;
 async function conectarDB() {
   if (!process.env.MONGODB_URI) {
     console.log('Aviso: no hay MONGODB_URI configurada. El registro de usuarios no estara disponible.');
@@ -62,6 +86,7 @@ async function conectarDB() {
   baneadosCol = cliente.db('chat_educativo').collection('baneados');
   await baneadosCol.createIndex({ ip: 1 }, { unique: true });
   notasStaffCol = cliente.db('chat_educativo').collection('notasStaff');
+  estadisticasCol = cliente.db('chat_educativo').collection('estadisticas');
   await cargarBaneados();
   console.log('Conectado a la base de datos correctamente');
 }
@@ -101,6 +126,22 @@ function listaSalasPara(socketId) {
 
 function emitirSalasATodos() {
   io.sockets.sockets.forEach((s) => s.emit('salasActualizadas', listaSalasPara(s.id)));
+}
+
+function registrarEstadistica(nick) {
+  if (!estadisticasCol) return;
+  const hoy = new Date().toISOString().slice(0, 10); // AAAA-MM-DD
+  const hora = new Date().getHours();
+  estadisticasCol.findOneAndUpdate(
+    { _id: 'global' },
+    { $inc: { totalMensajes: 1, [`porUsuario.${nick}`]: 1, [`porHora.${hora}`]: 1 } },
+    { upsert: true }
+  ).catch(() => {});
+  estadisticasCol.findOneAndUpdate(
+    { _id: 'dia_' + hoy },
+    { $inc: { mensajes: 1 } },
+    { upsert: true }
+  ).catch(() => {});
 }
 
 function usuariosDeSala(sala) {
@@ -208,7 +249,10 @@ function obtenerIP(socket) {
 io.on('connection', (socket) => {
   const ip = obtenerIP(socket);
   if (ipsBaneadasCache.has(ip)) {
-    socket.emit('error_app', 'Tu acceso a este chat ha sido bloqueado.');
+    socket.emit('estasBaneado', {
+      adminOnline: !!adminSocketId,
+      modsOnline: moderadores.size > 0
+    });
     socket.disconnect(true);
     return;
   }
@@ -378,6 +422,8 @@ io.on('connection', (socket) => {
     const msg = { salaId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
     if (salaId === 'staff' && notasStaffCol) {
       notasStaffCol.insertOne({ nick, texto: textoLimpio, fecha: new Date() }).catch(() => {});
+    } else {
+      registrarEstadistica(nick);
     }
     io.to(salaId).emit('mensajeSala', msg);
     const espectadores = [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id));
@@ -510,12 +556,48 @@ io.on('connection', (socket) => {
   });
 
   // ---- Listado y desbaneo de IPs (admin o moderador) ----
+  socket.on('pedirEstadisticas', async () => {
+    if (!esModOAdmin(socket.id)) return;
+    if (!estadisticasCol || !usuariosCol) { socket.emit('error_app', 'Estadisticas no disponibles ahora mismo.'); return; }
+
+    const global = await estadisticasCol.findOne({ _id: 'global' });
+    const hoy = new Date().toISOString().slice(0, 10);
+    const deHoy = await estadisticasCol.findOne({ _id: 'dia_' + hoy });
+    const totalRegistrados = await usuariosCol.countDocuments({});
+
+    let topUsuarios = [];
+    let horaPico = null;
+    if (global && global.porUsuario) {
+      topUsuarios = Object.entries(global.porUsuario)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 5)
+        .map(([nick, total]) => ({ nick, total }));
+    }
+    if (global && global.porHora) {
+      const entradas = Object.entries(global.porHora).sort((a, b) => b[1] - a[1]);
+      if (entradas.length) horaPico = `${entradas[0][0]}:00 - ${Number(entradas[0][0]) + 1}:00`;
+    }
+
+    socket.emit('estadisticas', {
+      totalMensajes: (global && global.totalMensajes) || 0,
+      mensajesHoy: (deHoy && deHoy.mensajes) || 0,
+      conectadosAhora: usuariosConectados.size,
+      salasActivas: Array.from(salas.values()).filter(s => !s.oculta).length,
+      totalRegistrados,
+      horaPico,
+      topUsuarios
+    });
+  });
+
   socket.on('pedirBaneados', async () => {
     if (!esModOAdmin(socket.id) || !baneadosCol) return;
     const lista = await baneadosCol.find({}).sort({ fecha: -1 }).toArray();
     socket.emit('listaBaneados', lista.map(b => ({
       ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
-      fecha: new Date(b.fecha).toLocaleString('es-ES')
+      fecha: new Date(b.fecha).toLocaleString('es-ES'),
+      mensajesApelacion: (b.mensajesApelacion || []).map(m => ({
+        texto: m.texto, fecha: new Date(m.fecha).toLocaleString('es-ES')
+      }))
     })));
   });
 
