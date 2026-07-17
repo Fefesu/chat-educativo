@@ -119,7 +119,7 @@ function unirseAStaff(socket) {
 async function enviarHistorialStaff(socket) {
   if (!notasStaffCol) return;
   try {
-    const historial = await notasStaffCol.find({}).sort({ fecha: -1 }).limit(50).toArray();
+    const historial = await notasStaffCol.find({}).sort({ fecha: -1 }).limit(100).toArray();
     socket.emit('historialStaff', historial.reverse().map(n => ({
       nick: n.nick,
       texto: n.texto,
