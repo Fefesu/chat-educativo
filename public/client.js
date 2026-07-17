@@ -106,6 +106,20 @@ function escapar(str) {
   return p.innerHTML;
 }
 
+function resaltarMenciones(texto) {
+  const escapado = escapar(texto);
+  return escapado.replace(/@([a-zA-Z0-9_.-]{3,20})/g, (coincidencia, nombre) => {
+    const esParaMi = miNick && nombre.toLowerCase() === miNick.toLowerCase();
+    return `<span class="mencion${esParaMi ? ' mencion-propia' : ''}">@${nombre}</span>`;
+  });
+}
+
+function contieneMiMencion(texto) {
+  if (!miNick || !texto) return false;
+  const regex = new RegExp(`@${miNick.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\b`, 'i');
+  return regex.test(texto);
+}
+
 // Paleta de colores para diferenciar nicks. La misma persona siempre
 // obtiene el mismo color (se calcula a partir de las letras de su nick),
 // asi que se ve igual en la pantalla de todo el mundo.
@@ -206,7 +220,7 @@ function renderMensajes() {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       div.innerHTML = `
         <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
-        <div class="texto">${escapar(item.texto)}</div>
+        <div class="texto">${resaltarMenciones(item.texto)}</div>
         <div class="hora">${item.hora}</div>
       `;
       if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, item.texto));
@@ -363,6 +377,9 @@ socket.on('mensajeSala', (msg) => {
       if (msg.salaId === salaActiva) renderMensajes();
     }, 3 * 60 * 1000);
   }
+  if (msg.tipo === 'texto' && msg.nick !== miNick && contieneMiMencion(msg.texto)) {
+    avisarMensajePrivadoNuevo();
+  }
   if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
 });
 
@@ -380,6 +397,46 @@ socket.on('sistema', ({ texto }) => {
 });
 
 socket.on('error_app', (texto) => alert(texto));
+
+socket.on('estasBaneado', ({ adminOnline, modsOnline }) => {
+  const textoBoton = adminOnline
+    ? 'Contactar con el administrador'
+    : modsOnline
+      ? 'Contactar con moderación'
+      : 'Dejar un mensaje';
+
+  document.body.innerHTML = `
+    <div class="pantalla-baneado">
+      <div class="pantalla-baneado-caja">
+        <h2>🚫 Has sido bloqueado de este chat</h2>
+        <p>Si crees que ha sido un error, puedes dejar un mensaje explicándolo. Quedará guardado y lo revisará el equipo de moderación.</p>
+        <textarea id="mensajeApelacion" maxlength="500" placeholder="Escribe aquí tu mensaje..."></textarea>
+        <button type="button" id="btnEnviarApelacion">${textoBoton}</button>
+        <p id="avisoApelacion" class="aviso-apelacion"></p>
+      </div>
+    </div>
+  `;
+  document.getElementById('btnEnviarApelacion').addEventListener('click', async () => {
+    const mensaje = document.getElementById('mensajeApelacion').value.trim();
+    const aviso = document.getElementById('avisoApelacion');
+    if (!mensaje) { aviso.textContent = 'Escribe algo antes de enviar.'; return; }
+    try {
+      const resp = await fetch('/api/apelar-baneo', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mensaje })
+      });
+      if (resp.ok) {
+        aviso.textContent = '✅ Mensaje enviado. Gracias por tu paciencia.';
+        document.getElementById('btnEnviarApelacion').disabled = true;
+      } else {
+        aviso.textContent = 'No se pudo enviar, inténtalo de nuevo en unos minutos.';
+      }
+    } catch (e) {
+      aviso.textContent = 'No se pudo enviar, inténtalo de nuevo en unos minutos.';
+    }
+  });
+});
 socket.on('avisoOk', (texto) => alert(texto));
 
 socket.on('rolAsignado', ({ rol }) => {
@@ -403,9 +460,13 @@ socket.on('listaBaneados', (baneados) => {
   baneados.forEach(b => {
     const div = document.createElement('div');
     div.className = 'fila-baneado';
+    const apelaciones = (b.mensajesApelacion || []).map(m =>
+      `<p class="mensaje-apelacion">📨 "${escapar(m.texto)}" <span>(${escapar(m.fecha)})</span></p>`
+    ).join('');
     div.innerHTML = `
       <span><strong>${escapar(b.nick)}</strong></span>
       <span class="detalle-baneo">Bloqueado por ${escapar(b.baneadoPor)} · ${escapar(b.fecha)}</span>
+      ${apelaciones}
     `;
     const btn = document.createElement('button');
     btn.textContent = 'Desbanear';
@@ -423,6 +484,33 @@ cabeceraBaneados.addEventListener('click', () => {
   listaBaneadosEl.classList.toggle('plegada');
   flechaBaneados.textContent = listaBaneadosEl.classList.contains('plegada') ? '▸' : '▾';
   if (!listaBaneadosEl.classList.contains('plegada')) socket.emit('pedirBaneados');
+});
+
+const cabeceraStats = document.getElementById('cabeceraStats');
+const flechaStats = document.getElementById('flechaStats');
+const panelStats = document.getElementById('panelStats');
+
+cabeceraStats.addEventListener('click', () => {
+  panelStats.classList.toggle('plegada');
+  flechaStats.textContent = panelStats.classList.contains('plegada') ? '▸' : '▾';
+  if (!panelStats.classList.contains('plegada')) socket.emit('pedirEstadisticas');
+});
+
+socket.on('estadisticas', (s) => {
+  const filasTop = s.topUsuarios.length
+    ? s.topUsuarios.map((u, i) => `<p class="stat-linea">${i + 1}. ${escapar(u.nick)} — ${u.total} mensajes</p>`).join('')
+    : '<p class="stat-linea">Todavía no hay datos suficientes.</p>';
+
+  panelStats.innerHTML = `
+    <p class="stat-linea"><strong>${s.conectadosAhora}</strong> conectados ahora mismo</p>
+    <p class="stat-linea"><strong>${s.salasActivas}</strong> salas activas</p>
+    <p class="stat-linea"><strong>${s.totalRegistrados}</strong> cuentas registradas</p>
+    <p class="stat-linea"><strong>${s.mensajesHoy}</strong> mensajes hoy</p>
+    <p class="stat-linea"><strong>${s.totalMensajes}</strong> mensajes en total</p>
+    <p class="stat-linea">Hora con más actividad: <strong>${s.horaPico || '—'}</strong></p>
+    <p class="panel-admin-subtitulo" style="margin-top:8px;">Usuarios más activos:</p>
+    ${filasTop}
+  `;
 });
 
 socket.on('listaUsuarios', (usuarios) => {
@@ -503,6 +591,24 @@ btnAdmin.addEventListener('click', () => {
   if (clave) socket.emit('reclamarAdmin', { clave });
 });
 
+// ---- Modo oscuro ----
+const btnTema = document.getElementById('btnTema');
+function actualizarIconoTema() {
+  btnTema.textContent = document.documentElement.getAttribute('data-tema') === 'oscuro' ? '☀️' : '🌙';
+}
+actualizarIconoTema();
+btnTema.addEventListener('click', () => {
+  const esOscuroAhora = document.documentElement.getAttribute('data-tema') === 'oscuro';
+  if (esOscuroAhora) {
+    document.documentElement.removeAttribute('data-tema');
+    localStorage.setItem('tema', 'claro');
+  } else {
+    document.documentElement.setAttribute('data-tema', 'oscuro');
+    localStorage.setItem('tema', 'oscuro');
+  }
+  actualizarIconoTema();
+});
+
 const btnVerNormas = document.getElementById('btnVerNormas');
 const modalNormas = document.getElementById('modalNormas');
 const btnCerrarNormas = document.getElementById('btnCerrarNormas');
@@ -579,6 +685,27 @@ btnAdjuntar.addEventListener('click', () => inputArchivo.click());
 inputArchivo.addEventListener('change', () => {
   if (inputArchivo.files[0]) manejarArchivoSeleccionado(inputArchivo.files[0], { tipo: 'sala' });
   inputArchivo.value = '';
+});
+
+// ---- Selector de emojis ----
+const EMOJIS = ['😀','😂','😍','🥰','😊','👍','👎','❤️','🔥','🎉','😢','😮','😡','🤔','👋','🙏','💪','✅','❌','🥳','😴','🤗','😎','🙌','👏','🍀','☀️','🌙','💬','🎵'];
+const btnEmoji = document.getElementById('btnEmoji');
+const panelEmoji = document.getElementById('panelEmoji');
+panelEmoji.innerHTML = EMOJIS.map(e => `<button type="button" class="emoji-item">${e}</button>`).join('');
+
+btnEmoji.addEventListener('click', (e) => {
+  e.stopPropagation();
+  panelEmoji.classList.toggle('oculto');
+});
+panelEmoji.addEventListener('click', (e) => {
+  if (e.target.classList.contains('emoji-item')) {
+    entrada.value += e.target.textContent;
+    entrada.focus();
+    panelEmoji.classList.add('oculto');
+  }
+});
+document.addEventListener('click', (e) => {
+  if (!panelEmoji.contains(e.target) && e.target !== btnEmoji) panelEmoji.classList.add('oculto');
 });
 
 // ---- Chats privados (ventanas flotantes, maximo 2 a la vez) ----

@@ -12,6 +12,18 @@
   --borde: #E3DCC9;
 }
 
+:root[data-tema="oscuro"] {
+  --fondo: #1B221E;
+  --fondo-barra: #151A17;
+  --panel: #232B26;
+  --tinta: #EAE6DC;
+  --tinta-suave: #9AA69D;
+  --verde: #6FB396;
+  --verde-claro: #2C3B33;
+  --ambar: #E3A15A;
+  --borde: #354039;
+}
+
 * { box-sizing: border-box; }
 
 body {
@@ -549,6 +561,9 @@ body {
 }
 .landing-cabecera {
   padding: 28px 0 10px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
 }
 .landing-hero {
   text-align: center;
@@ -772,3 +787,108 @@ body {
   0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
   30% { opacity: 1; transform: translateY(-2px); }
 }
+
+/* ================== PANTALLA DE USUARIO BLOQUEADO ================== */
+.pantalla-baneado {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--fondo);
+  padding: 20px;
+}
+.pantalla-baneado-caja {
+  max-width: 440px;
+  width: 100%;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+}
+.pantalla-baneado-caja h2 { font-family: 'Fraunces', serif; font-size: 22px; margin: 0 0 12px; }
+.pantalla-baneado-caja p { font-size: 14px; color: var(--tinta-suave); line-height: 1.5; margin: 0 0 16px; }
+.pantalla-baneado-caja textarea {
+  width: 100%;
+  min-height: 90px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid var(--borde);
+  font-family: 'Karla', sans-serif;
+  font-size: 13px;
+  resize: vertical;
+  margin-bottom: 12px;
+  box-sizing: border-box;
+}
+.pantalla-baneado-caja button {
+  width: 100%;
+  border: none;
+  background: var(--verde);
+  color: #fff;
+  border-radius: 10px;
+  padding: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  font-family: 'Karla', sans-serif;
+}
+.pantalla-baneado-caja button:disabled { background: var(--borde); cursor: not-allowed; }
+.aviso-apelacion { font-size: 12px; margin: 10px 0 0; }
+
+.mensaje-apelacion {
+  font-size: 11px;
+  background: var(--verde-claro);
+  border-radius: 6px;
+  padding: 5px 8px;
+  margin: 4px 0 0;
+  color: var(--tinta);
+}
+.mensaje-apelacion span { color: var(--tinta-suave); }
+
+/* ================== SELECTOR DE EMOJIS ================== */
+.compositor-envoltorio { position: relative; }
+.panel-emoji {
+  position: absolute;
+  bottom: 100%;
+  left: 10px;
+  margin-bottom: 8px;
+  background: var(--panel);
+  border: 1px solid var(--borde);
+  border-radius: 12px;
+  padding: 8px;
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 2px;
+  box-shadow: 0 6px 20px rgba(36, 53, 43, 0.18);
+  z-index: 40;
+}
+.emoji-item {
+  border: none;
+  background: transparent;
+  font-size: 20px;
+  padding: 6px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.emoji-item:hover { background: var(--verde-claro); }
+
+/* ================== MENCIONES @nick ================== */
+.mencion {
+  background: var(--verde-claro);
+  color: var(--verde);
+  font-weight: 600;
+  padding: 1px 5px;
+  border-radius: 5px;
+}
+.mencion-propia {
+  background: var(--ambar);
+  color: #fff;
+}
+
+/* ================== PANEL DE ESTADISTICAS ================== */
+.stat-linea {
+  font-size: 12px;
+  color: var(--tinta);
+  margin: 0 0 4px;
+}
+.stat-linea strong { color: var(--verde); }

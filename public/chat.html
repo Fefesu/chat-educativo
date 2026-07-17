@@ -6,6 +6,9 @@
 <title>La Plaza · Chat</title>
 <link rel="stylesheet" href="style.css">
 <script>
+  if (localStorage.getItem('tema') === 'oscuro') document.documentElement.setAttribute('data-tema', 'oscuro');
+</script>
+<script>
   if (sessionStorage.getItem('normasAceptadas') !== '1') {
     window.location.replace('/');
   }
@@ -19,6 +22,7 @@
         <h1>La Plaza</h1>
       </div>
       <div class="cabecera-derecha">
+        <button type="button" id="btnTema" class="btn-link" title="Cambiar tema">🌙</button>
         <button type="button" id="btnVerNormas" class="btn-link">Normas y privacidad</button>
         <span class="etiqueta-rol" id="etiquetaRol"></span>
         <button class="btn-link" id="btnAdmin">Acceder como admin</button>
@@ -85,6 +89,12 @@
             <span class="flecha-desplegable" id="flechaBaneados">▸</span>
           </div>
           <div id="listaBaneadosEl" class="lista-usuarios-admin plegada"></div>
+
+          <div class="barra-salas-cab" id="cabeceraStats">
+            <p>📊 Estadísticas</p>
+            <span class="flecha-desplegable" id="flechaStats">▸</span>
+          </div>
+          <div id="panelStats" class="lista-usuarios-admin plegada"></div>
         </div>
       </aside>
 
@@ -92,12 +102,16 @@
         <div class="pestañas" id="pestañas"></div>
         <div class="chat" id="chat"></div>
         <p class="escribiendo-aviso" id="avisoEscribiendo"></p>
-        <form class="compositor" id="formulario">
-          <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="500">
-          <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
-          <input type="file" id="inputArchivo" accept="image/*" class="oculto">
-          <button type="submit">Enviar</button>
-        </form>
+        <div class="compositor-envoltorio">
+          <div id="panelEmoji" class="panel-emoji oculto"></div>
+          <form class="compositor" id="formulario">
+            <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="500">
+            <button type="button" id="btnEmoji" class="btn-camara" title="Insertar emoji">😊</button>
+            <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
+            <input type="file" id="inputArchivo" accept="image/*" class="oculto">
+            <button type="submit">Enviar</button>
+          </form>
+        </div>
       </main>
 
       <aside class="barra-conectados">
@@ -147,6 +161,7 @@
             <li><strong>Mensajes:</strong> no se guardan de forma permanente. Las imágenes se retiran de la vista a los 3 minutos, con copia de moderación durante 24h.</li>
             <li><strong>Chats privados:</strong> 100% anónimos, se borran al cerrarse.</li>
             <li><strong>IP:</strong> solo se registra si eres bloqueado por incumplir las normas.</li>
+            <li><strong>Estadísticas:</strong> guardamos contadores agregados (mensajes, actividad), nunca el contenido.</li>
           </ul>
         </section>
       </div>

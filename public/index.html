@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>La Plaza · Bienvenida</title>
 <link rel="stylesheet" href="style.css">
+<script>
+  if (localStorage.getItem('tema') === 'oscuro') document.documentElement.setAttribute('data-tema', 'oscuro');
+</script>
 </head>
 <body class="landing-body">
   <div class="landing">
@@ -13,6 +16,7 @@
         <span class="marca-punto"></span>
         <h1>La Plaza</h1>
       </div>
+      <button type="button" id="btnTema" class="btn-link" title="Cambiar tema">🌙</button>
     </header>
 
     <section class="landing-hero">
@@ -61,6 +65,7 @@
         <li><strong>Chats privados:</strong> son completamente anónimos, ni siquiera el equipo de moderación tiene acceso a ellos, y su contenido se borra al cerrar la conversación.</li>
         <li><strong>Dirección IP:</strong> solo se registra si un administrador o moderador bloquea tu acceso por incumplir las normas, junto con la fecha y quién realizó el bloqueo.</li>
         <li>No utilizamos cookies de rastreo ni compartimos datos con terceros con fines publicitarios.</li>
+        <li>Guardamos contadores agregados de actividad (número de mensajes, salas activas, usuarios más activos por cantidad de mensajes) para uso interno de administración. Nunca se guarda el contenido de los mensajes.</li>
       </ul>
       <p>Puedes solicitar la eliminación de tu cuenta y tus datos en cualquier momento escribiendo a <a href="mailto:laplazaayuda@gmail.com" class="landing-email">laplazaayuda@gmail.com</a>.</p>
     </section>
@@ -78,6 +83,23 @@
 
   <script>
     const casillaNormas = document.getElementById('aceptoNormas');
+
+    const btnTema = document.getElementById('btnTema');
+    function actualizarIconoTemaLanding() {
+      btnTema.textContent = document.documentElement.getAttribute('data-tema') === 'oscuro' ? '☀️' : '🌙';
+    }
+    actualizarIconoTemaLanding();
+    btnTema.addEventListener('click', () => {
+      const esOscuroAhora = document.documentElement.getAttribute('data-tema') === 'oscuro';
+      if (esOscuroAhora) {
+        document.documentElement.removeAttribute('data-tema');
+        localStorage.setItem('tema', 'claro');
+      } else {
+        document.documentElement.setAttribute('data-tema', 'oscuro');
+        localStorage.setItem('tema', 'oscuro');
+      }
+      actualizarIconoTemaLanding();
+    });
     const botonesEntrar = document.querySelectorAll('.btn-entrar-condicional');
     casillaNormas.addEventListener('change', () => {
       botonesEntrar.forEach(b => { b.disabled = !casillaNormas.checked; });
