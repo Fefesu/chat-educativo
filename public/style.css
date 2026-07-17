@@ -747,3 +747,28 @@ body {
 @media (max-width: 600px) {
   .bocadillo-aviso { left: 12px; right: 12px; max-width: none; bottom: 12px; }
 }
+
+/* ================== BOCADILLO "ESCRIBIENDO" JUNTO AL NICK ================== */
+.bocadillo-escribiendo {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 6px;
+  padding: 3px 7px;
+  background: var(--verde-claro);
+  border-radius: 10px;
+}
+.bocadillo-escribiendo span {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: var(--verde);
+  animation: parpadeoPunto 1.2s infinite ease-in-out;
+}
+.bocadillo-escribiendo span:nth-child(2) { animation-delay: 0.2s; }
+.bocadillo-escribiendo span:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes parpadeoPunto {
+  0%, 60%, 100% { opacity: 0.25; transform: translateY(0); }
+  30% { opacity: 1; transform: translateY(-2px); }
+}

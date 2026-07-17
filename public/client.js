@@ -232,7 +232,11 @@ function renderListaConectadosSala() {
   nicks.forEach(n => {
     const div = document.createElement('div');
     div.className = 'item-conectado';
-    div.innerHTML = `<span class="punto-conexion online"></span><span style="color:${colorDeNick(n)}">${escapar(n)}</span>`;
+    const escribiendoAhora = escribiendoPorSala[salaActiva] && escribiendoPorSala[salaActiva].has(n);
+    const bocadillo = escribiendoAhora
+      ? '<span class="bocadillo-escribiendo"><span></span><span></span><span></span></span>'
+      : '';
+    div.innerHTML = `<span class="punto-conexion online"></span><span style="color:${colorDeNick(n)}">${escapar(n)}</span>${bocadillo}`;
     if (n !== miNick) {
       div.addEventListener('click', () => socket.emit('abrirPrivado', { nickObjetivo: n }));
     } else {
@@ -334,19 +338,19 @@ socket.on('unido', ({ salaId }) => {
 socket.on('escribiendo', ({ salaId, nick }) => {
   if (!escribiendoPorSala[salaId]) escribiendoPorSala[salaId] = new Set();
   escribiendoPorSala[salaId].add(nick);
-  if (salaId === salaActiva) renderAvisoEscribiendo();
+  if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
 
   const clave = `${salaId}:${nick}`;
   clearTimeout(timersEscribiendo[clave]);
   timersEscribiendo[clave] = setTimeout(() => {
     escribiendoPorSala[salaId] && escribiendoPorSala[salaId].delete(nick);
-    if (salaId === salaActiva) renderAvisoEscribiendo();
+    if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
   }, 3000);
 });
 
 socket.on('dejoEscribir', ({ salaId, nick }) => {
   if (escribiendoPorSala[salaId]) escribiendoPorSala[salaId].delete(nick);
-  if (salaId === salaActiva) renderAvisoEscribiendo();
+  if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
 });
 
 socket.on('mensajeSala', (msg) => {
