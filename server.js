@@ -246,6 +246,17 @@ function obtenerIP(socket) {
   return (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
 }
 
+// ---- Deteccion de "gritar" en mayusculas ----
+const BLOQUEO_MAYUS_MS = 60 * 1000;
+const bloqueadosPorMayus = new Map(); // socket.id -> timestamp hasta el que esta bloqueado
+
+function esGritando(texto) {
+  const soloLetras = texto.replace(/[^a-zA-ZÀ-ÿ]/g, '');
+  if (soloLetras.length < 8) return false;
+  const mayusculas = soloLetras.replace(/[^A-ZÀ-Ý]/g, '');
+  return mayusculas.length / soloLetras.length > 0.8;
+}
+
 io.on('connection', (socket) => {
   const ip = obtenerIP(socket);
   if (ipsBaneadasCache.has(ip)) {
@@ -268,6 +279,24 @@ io.on('connection', (socket) => {
   io.emit('totalConectados', usuariosConectados.size);
 
   // ---- Registro de cuenta nueva ----
+  // ---- Cerrar sesion (vuelve a ser usuario anonimo con nick aleatorio) ----
+  socket.on('cerrarSesion', () => {
+    const nickAnterior = usuariosConectados.get(socket.id);
+    if (adminSocketId === socket.id) adminSocketId = null;
+    moderadores.delete(socket.id);
+    salirDeStaff(socket);
+    socket.data.registrado = false;
+    socket.data.usuario = null;
+
+    const nuevoNick = generarNick();
+    usuariosConectados.set(socket.id, nuevoNick);
+
+    socket.emit('sesionCerrada', { nick: nuevoNick });
+    io.emit('sistema', { texto: `${nickAnterior} ha cerrado sesion` });
+    io.emit('totalConectados', usuariosConectados.size);
+    emitirSalasATodos();
+  });
+
   socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El registro no esta disponible ahora mismo.'); return; }
     if (!mayorDeEdad) { socket.emit('error_app', 'Debes confirmar que eres mayor de 18 años para registrarte.'); return; }
@@ -395,6 +424,19 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const bloqueadoHasta = bloqueadosPorMayus.get(socket.id);
+    if (bloqueadoHasta && Date.now() < bloqueadoHasta) {
+      const segundosRestantes = Math.ceil((bloqueadoHasta - Date.now()) / 1000);
+      socket.emit('error_app', `Espera ${segundosRestantes} segundos antes de volver a escribir.`);
+      return;
+    }
+
+    if (!imagenDataUrl && esGritando(String(texto || ''))) {
+      bloqueadosPorMayus.set(socket.id, Date.now() + BLOQUEO_MAYUS_MS);
+      socket.emit('error_app', '🤫 Tómate un respiro antes de responder. Aquí no se grita, evita las mayúsculas.');
+      return;
+    }
+
     const nick = usuariosConectados.get(socket.id);
     const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
@@ -415,11 +457,12 @@ io.on('connection', (socket) => {
       return;
     }
 
-    let textoLimpio = String(texto || '').trim().slice(0, 500);
+    let textoLimpio = String(texto || '').trim().slice(0, 400);
     if (!textoLimpio) return;
     if (contieneMalasPalabras(textoLimpio)) textoLimpio = censurar(textoLimpio);
 
-    const msg = { salaId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
+    const msgId = 'msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
+    const msg = { salaId, id: msgId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
     if (salaId === 'staff' && notasStaffCol) {
       notasStaffCol.insertOne({ nick, texto: textoLimpio, fecha: new Date() }).catch(() => {});
     } else {
@@ -648,7 +691,7 @@ io.on('connection', (socket) => {
 
   socket.on('mensajePrivado', ({ canalId, texto }) => {
     if (!socket.rooms.has(canalId)) return;
-    const textoLimpio = String(texto || '').trim().slice(0, 500);
+    const textoLimpio = String(texto || '').trim().slice(0, 400);
     if (!textoLimpio) return;
     io.to(canalId).emit('mensajePrivado', {
       canalId, nick: usuariosConectados.get(socket.id), texto: textoLimpio,
@@ -680,6 +723,18 @@ io.on('connection', (socket) => {
   socket.on('cerrarPrivado', ({ canalId }) => cerrarPrivadoInterno(socket, canalId, 'cerrado'));
 
   // ---- Reportar mensaje (cualquier usuario) ----
+  // ---- Eliminar un mensaje concreto (admin o moderador), dejando constancia ----
+  socket.on('eliminarMensaje', ({ salaId, mensajeId }) => {
+    if (!esModOAdmin(socket.id)) return;
+    if (!salaId || !mensajeId) return;
+    io.to(salaId).emit('mensajeEliminado', { salaId, mensajeId });
+    const sala = salas.get(salaId);
+    if (sala) {
+      const espectadores = [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id));
+      espectadores.forEach(id => io.to(id).emit('mensajeEliminado', { salaId, mensajeId }));
+    }
+  });
+
   socket.on('reportarMensaje', ({ salaId, nickReportado, texto }) => {
     const sala = salas.get(salaId);
     const nombreSala = sala ? sala.nombre : salaId;
