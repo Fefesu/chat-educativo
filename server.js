@@ -234,16 +234,67 @@ function estaEnFlood(socketId) {
 
 // ---- IPs baneadas (persistentes si hay base de datos) ----
 let baneadosCol = null;
-const ipsBaneadasCache = new Set();
+const ipsBaneadasCache = new Map(); // ip -> fecha de expiracion en ms, o null si es permanente
 
 async function cargarBaneados() {
   if (!baneadosCol) return;
   const baneados = await baneadosCol.find({}).toArray();
-  baneados.forEach(b => ipsBaneadasCache.add(b.ip));
+  const ahora = Date.now();
+  baneados.forEach(b => {
+    const expira = b.expira ? new Date(b.expira).getTime() : null;
+    if (!expira || expira > ahora) ipsBaneadasCache.set(b.ip, expira);
+  });
+}
+
+function estaBaneada(ip) {
+  if (!ipsBaneadasCache.has(ip)) return false;
+  const expira = ipsBaneadasCache.get(ip);
+  if (expira && Date.now() > expira) {
+    ipsBaneadasCache.delete(ip);
+    return false;
+  }
+  return true;
 }
 
 function obtenerIP(socket) {
   return (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+}
+
+// ---- Bot moderador (aparece como un nick cualquiera, no revela que es automatico) ----
+const NICK_BOT = generarNick();
+const infraccionesPorSocket = new Map(); // socket.id -> array de timestamps de infracciones
+const VENTANA_INFRACCIONES_MS = 10 * 60 * 1000;
+const MAX_INFRACCIONES_ANTES_DE_BANEO = 3;
+const DURACION_BANEO_BOT_MS = 60 * 60 * 1000; // 1 hora
+
+function hayStaffConectado() {
+  return !!adminSocketId || moderadores.size > 0;
+}
+
+async function registrarInfraccionYComprobarEscalado(socket, ip, nick) {
+  const ahora = Date.now();
+  const historial = (infraccionesPorSocket.get(socket.id) || []).filter(t => ahora - t < VENTANA_INFRACCIONES_MS);
+  historial.push(ahora);
+  infraccionesPorSocket.set(socket.id, historial);
+
+  if (historial.length >= MAX_INFRACCIONES_ANTES_DE_BANEO) {
+    infraccionesPorSocket.delete(socket.id);
+    const expira = Date.now() + DURACION_BANEO_BOT_MS;
+    ipsBaneadasCache.set(ip, expira);
+    if (baneadosCol) {
+      try {
+        await baneadosCol.updateOne(
+          { ip },
+          { $set: { nick, baneadoPor: NICK_BOT + ' (automatico)', fecha: new Date(), expira: new Date(expira) } },
+          { upsert: true }
+        );
+      } catch (e) { /* silencioso */ }
+    }
+    socket.emit('estasBaneado', { adminOnline: !!adminSocketId, modsOnline: moderadores.size > 0 });
+    socket.disconnect(true);
+    return true;
+  }
+  return false;
 }
 
 // ---- Deteccion de "gritar" en mayusculas ----
@@ -259,7 +310,7 @@ function esGritando(texto) {
 
 io.on('connection', (socket) => {
   const ip = obtenerIP(socket);
-  if (ipsBaneadasCache.has(ip)) {
+  if (estaBaneada(ip)) {
     socket.emit('estasBaneado', {
       adminOnline: !!adminSocketId,
       modsOnline: moderadores.size > 0
@@ -431,14 +482,22 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const nick = usuariosConectados.get(socket.id);
+    const ip = obtenerIP(socket);
+    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+
     if (!imagenDataUrl && esGritando(String(texto || ''))) {
       bloqueadosPorMayus.set(socket.id, Date.now() + BLOQUEO_MAYUS_MS);
       socket.emit('error_app', '🤫 Tómate un respiro antes de responder. Aquí no se grita, evita las mayúsculas.');
+      registrarInfraccionYComprobarEscalado(socket, ip, nick);
+      if (!hayStaffConectado()) {
+        io.to(salaId).emit('mensajeSala', {
+          salaId, id: 'bot_' + Date.now(), nick: NICK_BOT, rol: 'usuario', registrado: false, tipo: 'texto',
+          texto: `@${nick} tómate un respiro antes de responder 🙏 aquí no se grita`, hora
+        });
+      }
       return;
     }
-
-    const nick = usuariosConectados.get(socket.id);
-    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
 
     if (imagenDataUrl) {
       if (!esImagenValida(imagenDataUrl)) {
@@ -459,7 +518,10 @@ io.on('connection', (socket) => {
 
     let textoLimpio = String(texto || '').trim().slice(0, 400);
     if (!textoLimpio) return;
-    if (contieneMalasPalabras(textoLimpio)) textoLimpio = censurar(textoLimpio);
+    if (contieneMalasPalabras(textoLimpio)) {
+      textoLimpio = censurar(textoLimpio);
+      registrarInfraccionYComprobarEscalado(socket, ip, nick);
+    }
 
     const msgId = 'msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const msg = { salaId, id: msgId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
@@ -588,10 +650,10 @@ io.on('connection', (socket) => {
     const socketDestino = io.sockets.sockets.get(socketIdDestino);
     if (!socketDestino) return;
     const ip = obtenerIP(socketDestino);
-    ipsBaneadasCache.add(ip);
+    ipsBaneadasCache.set(ip, null);
     const baneadoPor = usuariosConectados.get(socket.id);
     if (baneadosCol) {
-      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, baneadoPor, fecha: new Date() }); } catch (e) { /* ya existia */ }
+      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, baneadoPor, fecha: new Date(), expira: null }); } catch (e) { /* ya existia */ }
     }
     socketDestino.emit('error_app', 'Has sido bloqueado de este chat por un administrador.');
     socketDestino.disconnect(true);
