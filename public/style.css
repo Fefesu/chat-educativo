@@ -857,8 +857,10 @@ body {
   border-radius: 12px;
   padding: 8px;
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 2px;
+  max-height: 220px;
+  overflow-y: auto;
   box-shadow: 0 6px 20px rgba(36, 53, 43, 0.18);
   z-index: 40;
 }
@@ -892,3 +894,25 @@ body {
   margin: 0 0 4px;
 }
 .stat-linea strong { color: var(--verde); }
+
+/* ================== ELIMINAR MENSAJE / SILENCIAR USUARIO ================== */
+.btn-eliminar-msg { right: 30px; }
+
+.ventana-privado-cab-botones { display: flex; gap: 4px; align-items: center; }
+.btn-silenciar-privado {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  line-height: 1;
+}
+
+.aviso-silenciado {
+  font-size: 12px;
+  color: var(--tinta-suave);
+  text-align: center;
+  padding: 20px 10px;
+  font-style: italic;
+}
+
+.mensaje-silenciado { opacity: 0.7; }

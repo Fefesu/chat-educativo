@@ -46,6 +46,12 @@ const listaBaneadosEl = document.getElementById('listaBaneadosEl');
 const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
 const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true }
 
+// ---- Usuarios silenciados/ignorados (se guarda en este navegador) ----
+const usuariosIgnorados = new Set(JSON.parse(localStorage.getItem('ignorados') || '[]'));
+function guardarIgnorados() {
+  localStorage.setItem('ignorados', JSON.stringify(Array.from(usuariosIgnorados)));
+}
+
 // ---- Aviso de mensaje privado nuevo: sonido suave + parpadeo del titulo ----
 const tituloOriginal = document.title;
 let parpadeoInterval = null;
@@ -197,15 +203,51 @@ function crearBotonReportar(nickReportado, texto) {
   return btn;
 }
 
+function crearBotonEliminar(mensajeId) {
+  const btn = document.createElement('button');
+  btn.className = 'btn-reportar btn-eliminar-msg';
+  btn.textContent = '🗑';
+  btn.title = 'Eliminar este mensaje';
+  btn.addEventListener('click', () => {
+    if (confirm('¿Eliminar este mensaje? Quedará una marca visible de que se borró.')) {
+      socket.emit('eliminarMensaje', { salaId: salaActiva, mensajeId });
+    }
+  });
+  return btn;
+}
+
 function renderMensajes() {
   chat.innerHTML = '';
   const lista = mensajesPorSala[salaActiva] || [];
   lista.forEach(item => {
     const div = document.createElement('div');
+
     if (item.tipo === 'sistema') {
       div.className = 'sistema';
       div.textContent = item.texto;
-    } else if (item.tipo === 'imagen') {
+      chat.appendChild(div);
+      return;
+    }
+
+    if (usuariosIgnorados.has(item.nick)) {
+      div.className = 'mensaje mensaje-silenciado';
+      div.innerHTML = `<p class="imagen-eliminada">🔇 Mensaje oculto (has silenciado a ${escapar(item.nick)})</p>`;
+      chat.appendChild(div);
+      return;
+    }
+
+    if (item.eliminadoManual) {
+      div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
+      div.innerHTML = `
+        <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
+        <p class="imagen-eliminada">[Mensaje eliminado por infringir la norma de respeto]</p>
+        <div class="hora">${item.hora}</div>
+      `;
+      chat.appendChild(div);
+      return;
+    }
+
+    if (item.tipo === 'imagen') {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       const cuerpoImg = item.eliminada
         ? '<p class="imagen-eliminada">🕒 Imagen eliminada tras 3 minutos</p>'
@@ -216,6 +258,7 @@ function renderMensajes() {
         <div class="hora">${item.hora}</div>
       `;
       if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, '[imagen]'));
+      if (esPrivilegiado() && item.id) div.appendChild(crearBotonEliminar(item.id));
     } else {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       div.innerHTML = `
@@ -224,6 +267,7 @@ function renderMensajes() {
         <div class="hora">${item.hora}</div>
       `;
       if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, item.texto));
+      if (esPrivilegiado() && item.id) div.appendChild(crearBotonEliminar(item.id));
     }
     chat.appendChild(div);
   });
@@ -383,6 +427,14 @@ socket.on('mensajeSala', (msg) => {
   if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
 });
 
+socket.on('mensajeEliminado', ({ salaId, mensajeId }) => {
+  const lista = mensajesPorSala[salaId];
+  if (!lista) return;
+  const msg = lista.find(m => m.id === mensajeId);
+  if (msg) msg.eliminadoManual = true;
+  if (salaId === salaActiva) renderMensajes();
+});
+
 socket.on('salaEliminada', ({ salaId }) => {
   salasUnidas.delete(salaId);
   delete mensajesPorSala[salaId];
@@ -540,6 +592,21 @@ socket.on('listaUsuarios', (usuarios) => {
   });
 });
 
+socket.on('sesionCerrada', ({ nick }) => {
+  miNick = nick;
+  miRol = 'usuario';
+  cuentaAnonima.classList.remove('oculto');
+  cuentaConectada.classList.add('oculto');
+  usuarioInput.value = '';
+  contrasenaInput.value = '';
+  if (mayorEdadInput) mayorEdadInput.checked = false;
+  etiquetaRol.textContent = '';
+  btnAdmin.classList.remove('oculto');
+  panelAdmin.classList.add('oculto');
+  renderListaSalas();
+  renderPestañas();
+});
+
 socket.on('sesionIniciada', ({ usuario, rol }) => {
   miNick = usuario;
   cuentaAnonima.classList.add('oculto');
@@ -664,6 +731,10 @@ btnIniciarSesion.addEventListener('click', () => {
   socket.emit('iniciarSesion', { usuario, contrasena });
 });
 
+document.getElementById('btnCerrarSesion').addEventListener('click', () => {
+  if (confirm('¿Cerrar tu sesión?')) socket.emit('cerrarSesion');
+});
+
 // ---- Subida de imagenes (fotos y GIFs desde el propio dispositivo) ----
 function manejarArchivoSeleccionado(file, destino) {
   if (!file.type.startsWith('image/')) { alert('Solo se permiten imagenes (foto en cualquier formato) o GIFs.'); return; }
@@ -688,7 +759,7 @@ inputArchivo.addEventListener('change', () => {
 });
 
 // ---- Selector de emojis ----
-const EMOJIS = ['😀','😂','😍','🥰','😊','👍','👎','❤️','🔥','🎉','😢','😮','😡','🤔','👋','🙏','💪','✅','❌','🥳','😴','🤗','😎','🙌','👏','🍀','☀️','🌙','💬','🎵'];
+const EMOJIS = ['😀','😂','😅','😉','😍','🥰','😘','😊','🙂','😇','🤩','😜','🤗','😴','😢','😭','😮','😱','😡','🤔','😏','😎','🥳','🤝','👍','👎','👏','🙌','🙏','💪','👋','✌️','🤞','❤️','💚','💙','💛','🔥','✨','⭐','🎉','🎂','🍀','☀️','🌙','☕','🍕','⚽','💬','✅'];
 const btnEmoji = document.getElementById('btnEmoji');
 const panelEmoji = document.getElementById('panelEmoji');
 panelEmoji.innerHTML = EMOJIS.map(e => `<button type="button" class="emoji-item">${e}</button>`).join('');
@@ -714,6 +785,12 @@ function renderMensajesPrivado(canalId) {
   const p = privados[canalId];
   if (!cont || !p) return;
   cont.innerHTML = '';
+
+  if (usuariosIgnorados.has(p.conNick)) {
+    cont.innerHTML = '<p class="aviso-silenciado">🔇 Has silenciado a esta persona. Ya no ves sus mensajes.</p>';
+    return;
+  }
+
   p.mensajes.forEach(m => {
     const div = document.createElement('div');
     div.className = 'msg-privado' + (m.nick === miNick ? ' propio' : '');
@@ -735,17 +812,28 @@ function renderPrivados() {
     div.innerHTML = `
       <div class="ventana-privado-cab">
         <span>${escapar(p.conNick)}${p.conectado ? '' : ' <span class="estado-privado">(desconectado)</span>'}</span>
-        <button type="button" class="btn-cerrar-privado">✕</button>
+        <div class="ventana-privado-cab-botones">
+          <button type="button" class="btn-silenciar-privado" title="Silenciar a esta persona">${usuariosIgnorados.has(p.conNick) ? '🔇' : '🔊'}</button>
+          <button type="button" class="btn-cerrar-privado">✕</button>
+        </div>
       </div>
       <div class="ventana-privado-chat" id="chatPrivado_${canalId}"></div>
       <div class="ventana-privado-input">
-        <input type="text" placeholder="Mensaje privado..." ${p.conectado ? '' : 'disabled'}>
+        <input type="text" placeholder="Mensaje privado..." maxlength="400" ${p.conectado ? '' : 'disabled'}>
         <button type="button" class="btn-foto-privado" ${p.conectado ? '' : 'disabled'}>📷</button>
         <button type="button" class="btn-enviar-privado" ${p.conectado ? '' : 'disabled'}>➤</button>
       </div>
     `;
     privadosContenedor.appendChild(div);
     renderMensajesPrivado(canalId);
+
+    div.querySelector('.btn-silenciar-privado').addEventListener('click', () => {
+      if (usuariosIgnorados.has(p.conNick)) usuariosIgnorados.delete(p.conNick);
+      else usuariosIgnorados.add(p.conNick);
+      guardarIgnorados();
+      renderPrivados();
+      renderMensajes();
+    });
 
     div.querySelector('.btn-cerrar-privado').addEventListener('click', () => {
       socket.emit('cerrarPrivado', { canalId });
