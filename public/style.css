@@ -499,10 +499,17 @@ body {
 .compositor button:hover { background: #264C3E; }
 
 /* ================== VERSION MOVIL ================== */
+/* Tablets (p.ej. iPad en vertical): mantenemos las 3 columnas pero mas estrechas */
+@media (max-width: 1000px) and (min-width: 761px) {
+  .barra-salas { width: 200px; }
+  .barra-conectados { width: 160px; }
+  .mensaje { max-width: 85%; }
+}
+
 @media (max-width: 760px) {
   .cabecera { padding: 10px 12px; flex-wrap: wrap; gap: 6px; }
   .marca h1 { font-size: 18px; }
-  .cabecera-derecha { gap: 8px; font-size: 11px; flex-wrap: wrap; }
+  .cabecera-derecha { gap: 6px; font-size: 11px; flex-wrap: wrap; row-gap: 6px; }
   .estado { font-size: 11px; }
   .btn-link { font-size: 11px; padding: 5px 8px; }
 
@@ -533,10 +540,13 @@ body {
 
   .escribiendo-aviso { padding: 3px 10px; }
 
-  .compositor { padding: 10px 10px 14px; gap: 6px; }
-  .compositor input { padding: 10px 12px; font-size: 14px; }
-  .btn-camara { font-size: 20px; padding: 0 12px; }
-  .compositor button { padding: 10px 14px; font-size: 13px; }
+  .compositor { padding: 10px 8px 14px; gap: 4px; }
+  .compositor input { padding: 10px; font-size: 14px; min-width: 0; }
+  .btn-camara { font-size: 18px; padding: 0 10px; flex-shrink: 0; }
+  .compositor button[type="submit"] { padding: 10px 12px; font-size: 13px; flex-shrink: 0; }
+
+  .panel-emoji { grid-template-columns: repeat(6, 1fr); left: 4px; right: 4px; }
+  .emoji-item { font-size: 18px; padding: 5px; }
 
   .privados-contenedor {
     right: 8px;
@@ -546,6 +556,16 @@ body {
     align-items: stretch;
   }
   .ventana-privado { width: 100%; height: 260px; }
+}
+
+/* Moviles muy estrechos (menos de 380px) */
+@media (max-width: 380px) {
+  .cabecera-derecha { font-size: 10px; }
+  .btn-link { padding: 4px 6px; font-size: 10px; }
+  .compositor input { font-size: 13px; padding: 8px; }
+  .btn-camara { font-size: 16px; padding: 0 8px; }
+  .compositor button[type="submit"] { padding: 8px 10px; font-size: 12px; }
+  .panel-emoji { grid-template-columns: repeat(5, 1fr); }
 }
 
 /* ================== PAGINA DE BIENVENIDA (LANDING) ================== */
