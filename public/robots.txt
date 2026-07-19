@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+Disallow: /chat.html
+
+Sitemap: https://chat-educativo-qgub.onrender.com/sitemap.xml
