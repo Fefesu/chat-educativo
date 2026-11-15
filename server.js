@@ -5,6 +5,17 @@ const path = require('path');
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
 
+// ---- Fecha y hora en horario de España (Render trabaja en UTC) ----
+const ZONA_HORARIA = 'Europe/Madrid';
+function horaMadrid(fecha) {
+  return new Date(fecha || Date.now()).toLocaleTimeString('es-ES', { timeZone: ZONA_HORARIA, hour: '2-digit', minute: '2-digit' });
+}
+function fechaHoraMadrid(fecha) {
+  const f = new Date(fecha || Date.now());
+  const dia = f.toLocaleDateString('es-ES', { timeZone: ZONA_HORARIA, day: '2-digit', month: '2-digit', year: 'numeric' });
+  return `${dia} · ${horaMadrid(f)}`;
+}
+
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 5 * 1024 * 1024 });
@@ -157,15 +168,32 @@ function unirseAStaff(socket) {
   enviarHistorialStaff(socket);
 }
 
+// Historial de la sala staff: siempre se conservan como máximo 100 entradas.
+// Al entrar la 101, se borra la más antigua (y cualquier sobrante que hubiera de antes).
+const LIMITE_HISTORIAL_STAFF = 100;
+async function guardarEnHistorialStaff(entrada) {
+  if (!notasStaffCol) return;
+  try {
+    await notasStaffCol.insertOne({ ...entrada, fecha: new Date() });
+    const sobrantes = await notasStaffCol
+      .find({}, { projection: { _id: 1 } })
+      .sort({ fecha: -1, _id: -1 })
+      .skip(LIMITE_HISTORIAL_STAFF)
+      .toArray();
+    if (sobrantes.length) {
+      await notasStaffCol.deleteMany({ _id: { $in: sobrantes.map(d => d._id) } });
+    }
+  } catch (e) { /* silencioso: el chat sigue funcionando aunque falle el guardado */ }
+}
+
 async function enviarHistorialStaff(socket) {
   if (!notasStaffCol) return;
   try {
-    const historial = await notasStaffCol.find({}).sort({ fecha: -1 }).limit(100).toArray();
-    socket.emit('historialStaff', historial.reverse().map(n => ({
-      nick: n.nick,
-      texto: n.texto,
-      hora: new Date(n.fecha).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
-    })));
+    const historial = await notasStaffCol.find({}).sort({ fecha: -1, _id: -1 }).limit(LIMITE_HISTORIAL_STAFF).toArray();
+    socket.emit('historialStaff', historial.reverse().map(n => n.tipo === 'sistema'
+      ? { tipo: 'sistema', texto: `${fechaHoraMadrid(n.fecha)} — ${n.texto}` }
+      : { id: n.msgId, nick: n.nick, texto: n.texto, hora: fechaHoraMadrid(n.fecha) }
+    ));
   } catch (e) { /* silencioso: si falla, simplemente no hay historial */ }
 }
 
@@ -484,7 +512,7 @@ io.on('connection', (socket) => {
 
     const nick = usuariosConectados.get(socket.id);
     const ip = obtenerIP(socket);
-    const hora = new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' });
+    const hora = salaId === 'staff' ? fechaHoraMadrid() : horaMadrid();
 
     if (!imagenDataUrl && esGritando(String(texto || ''))) {
       bloqueadosPorMayus.set(socket.id, Date.now() + BLOQUEO_MAYUS_MS);
@@ -526,7 +554,7 @@ io.on('connection', (socket) => {
     const msgId = 'msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const msg = { salaId, id: msgId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
     if (salaId === 'staff' && notasStaffCol) {
-      notasStaffCol.insertOne({ nick, texto: textoLimpio, fecha: new Date() }).catch(() => {});
+      guardarEnHistorialStaff({ tipo: 'texto', msgId, nick, texto: textoLimpio });
     } else {
       registrarEstadistica(nick);
     }
@@ -757,7 +785,7 @@ io.on('connection', (socket) => {
     if (!textoLimpio) return;
     io.to(canalId).emit('mensajePrivado', {
       canalId, nick: usuariosConectados.get(socket.id), texto: textoLimpio,
-      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+      hora: horaMadrid()
     });
   });
 
@@ -766,7 +794,7 @@ io.on('connection', (socket) => {
     if (!esImagenValida(imagenDataUrl)) { socket.emit('error_app', 'Solo se permiten imagenes (foto o GIF) de hasta 4MB.'); return; }
     io.to(canalId).emit('imagenPrivada', {
       canalId, nick: usuariosConectados.get(socket.id), imagenDataUrl, imagenNombre: String(imagenNombre || 'imagen'),
-      hora: new Date().toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })
+      hora: horaMadrid()
     });
     // No se guarda ninguna copia: el privado es 100% anonimo y se borra al cerrarse.
   });
@@ -789,6 +817,7 @@ io.on('connection', (socket) => {
   socket.on('eliminarMensaje', ({ salaId, mensajeId }) => {
     if (!esModOAdmin(socket.id)) return;
     if (!salaId || !mensajeId) return;
+    if (salaId === 'staff' && notasStaffCol) notasStaffCol.deleteOne({ msgId: String(mensajeId) }).catch(() => {});
     io.to(salaId).emit('mensajeEliminado', { salaId, mensajeId });
     const sala = salas.get(salaId);
     if (sala) {
@@ -804,6 +833,7 @@ io.on('connection', (socket) => {
     const resumen = String(texto || '').slice(0, 120);
     const aviso = `🚩 ${quienReporta} reportó a ${nickReportado} en "${nombreSala}": "${resumen}"`;
     [adminSocketId, ...moderadores].filter(Boolean).forEach(id => io.to(id).emit('sistema', { texto: aviso }));
+    guardarEnHistorialStaff({ tipo: 'sistema', texto: aviso });
     socket.emit('avisoOk', 'Gracias, tu reporte se ha enviado a los moderadores.');
   });
 
