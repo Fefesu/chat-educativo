@@ -9,7 +9,7 @@
 <link rel="canonical" href="https://chat-educativo-qgub.onrender.com/">
 
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<meta name="theme-color" content="#2F5D4C">
+<meta name="theme-color" content="#6D4AFF">
 
 <!-- Open Graph (como se ve al compartir en WhatsApp, Facebook, etc.) -->
 <meta property="og:type" content="website">
@@ -51,18 +51,28 @@
         <span class="marca-punto"></span>
         <h1>La Plaza</h1>
       </div>
-      <button type="button" id="btnTema" class="btn-link" title="Cambiar tema">🌙</button>
+      <button type="button" id="btnTema" class="btn-icono" title="Cambiar tema">🌙</button>
     </header>
 
     <section class="landing-hero">
       <p class="landing-eyebrow">Un espacio de conversación</p>
-      <h2>Educación, respeto y buen humor, ante todo.</h2>
+      <h2>Educación, <em>respeto y buen humor</em>, ante todo.</h2>
       <p class="landing-subtexto">Salas de chat en tiempo real, abiertas a todo el mundo. Antes de entrar, tómate un minuto para leer cómo funciona esto.</p>
+      <div class="landing-chips">
+        <span class="chip">💬 Salas en tiempo real</span>
+        <span class="chip">🛡️ Moderación activa</span>
+        <span class="chip">🔒 Privados anónimos</span>
+      </div>
       <label class="landing-checkbox">
         <input type="checkbox" id="aceptoNormas">
-        <span>He leído y acepto las normas de la comunidad</span>
+        <span>He leído y acepto las normas de la comunidad, el aviso legal y la política de privacidad.</span>
       </label>
-      <button type="button" class="landing-btn-entrar btn-entrar-condicional" disabled>Entrar al chat →</button>
+      <label class="landing-checkbox">
+        <input type="checkbox" id="soyMayor">
+        <span>Confirmo que soy mayor de 18 años.</span>
+      </label>
+      <button type="button" class="landing-btn-entrar btn-entrar-condicional" disabled>Continuar →</button>
+      <p class="landing-pista">Después podrás iniciar sesión, crear tu cuenta o entrar como invitado.</p>
     </section>
 
     <section class="landing-seccion">
@@ -106,7 +116,7 @@
     </section>
 
     <footer class="landing-footer">
-      <button type="button" class="landing-btn-entrar landing-btn-footer btn-entrar-condicional" disabled>Entrar al chat →</button>
+      <button type="button" class="landing-btn-entrar landing-btn-footer btn-entrar-condicional" disabled>Continuar →</button>
       <p class="landing-copy">La Plaza · Hecho con cuidado para conversar mejor.</p>
     </footer>
   </div>
@@ -118,6 +128,7 @@
 
   <script>
     const casillaNormas = document.getElementById('aceptoNormas');
+    const casillaMayor = document.getElementById('soyMayor');
 
     const btnTema = document.getElementById('btnTema');
     function actualizarIconoTemaLanding() {
@@ -136,12 +147,17 @@
       actualizarIconoTemaLanding();
     });
     const botonesEntrar = document.querySelectorAll('.btn-entrar-condicional');
-    casillaNormas.addEventListener('change', () => {
-      botonesEntrar.forEach(b => { b.disabled = !casillaNormas.checked; });
-    });
+    function actualizarBotones() {
+      const listo = casillaNormas.checked && casillaMayor.checked;
+      botonesEntrar.forEach(b => { b.disabled = !listo; });
+    }
+    casillaNormas.addEventListener('change', actualizarBotones);
+    casillaMayor.addEventListener('change', actualizarBotones);
+    actualizarBotones();
     botonesEntrar.forEach(b => b.addEventListener('click', () => {
       if (!b.disabled) {
         sessionStorage.setItem('normasAceptadas', '1');
+        sessionStorage.setItem('mayorEdad', '1');
         window.location.href = '/chat.html';
       }
     }));
