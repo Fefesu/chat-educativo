@@ -171,8 +171,7 @@ function renderPestañas() {
     const color = colorDeSala(id);
     const activa = id === salaActiva;
     b.className = 'pestaña' + (activa ? ' activa' : '');
-    b.style.borderLeft = `4px solid ${color}`;
-    if (activa) { b.style.background = color; b.style.color = '#fff'; }
+    b.style.setProperty('--c', color);
     b.textContent = nombreDeSala(id);
     b.addEventListener('click', () => {
       salaActiva = id;
@@ -313,7 +312,7 @@ function renderListaSalas() {
     const unido = salasUnidas.has(s.id);
     const div = document.createElement('div');
     div.className = 'item-sala' + (s.id === salaActiva && (unido || esPrivilegiado()) ? ' activa' : '');
-    div.style.borderLeft = `4px solid ${colorDeSala(s.id)}`;
+    div.style.setProperty('--c', colorDeSala(s.id));
     div.innerHTML = `
       <span>${s.permanente ? '🔒 ' : ''}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
     `;
@@ -358,14 +357,14 @@ function agregarSistemaGlobal(texto) {
 // ---- Eventos del servidor ----
 socket.on('bienvenida', ({ nick, totalConectados: total, salas }) => {
   miNick = nick;
-  totalConectados.textContent = `${total} conectados · tu eres ${nick}`;
+  totalConectados.textContent = `${total} en línea`;
   salasDisponibles = salas;
   renderListaSalas();
   renderPestañas();
 });
 
 socket.on('totalConectados', (n) => {
-  totalConectados.textContent = `${n} conectados${miNick ? ' · tu eres ' + miNick : ''}`;
+  totalConectados.textContent = `${n} en línea`;
 });
 
 socket.on('salasActualizadas', (salas) => {
@@ -380,7 +379,7 @@ socket.on('usuariosDeSala', ({ salaId, usuarios }) => {
 });
 
 socket.on('historialStaff', (mensajes) => {
-  mensajesPorSala['staff'] = mensajes.map(m => ({ ...m, tipo: 'texto', salaId: 'staff' }));
+  mensajesPorSala['staff'] = mensajes.map(m => ({ ...m, tipo: m.tipo || 'texto', salaId: 'staff' }));
   if (salaActiva === 'staff') renderMensajes();
 });
 
@@ -448,7 +447,7 @@ socket.on('sistema', ({ texto }) => {
   if (esPrivilegiado()) socket.emit('pedirUsuarios');
 });
 
-socket.on('error_app', (texto) => alert(texto));
+socket.on('error_app', (texto) => avisarError(texto));
 
 socket.on('estasBaneado', ({ adminOnline, modsOnline }) => {
   const textoBoton = adminOnline
@@ -719,15 +718,15 @@ btnResetPass.addEventListener('click', () => {
 btnRegistrar.addEventListener('click', () => {
   const usuario = usuarioInput.value.trim();
   const contrasena = contrasenaInput.value;
-  if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
-  if (!mayorEdadInput.checked) { alert('Debes confirmar que eres mayor de 18 años.'); return; }
+  if (!usuario || !contrasena) { avisarAcceso('Rellena usuario y contraseña.'); return; }
+  if (contrasena !== document.getElementById('contrasena2Input').value) { avisarAcceso('Las contraseñas no coinciden.'); return; }
   socket.emit('registrar', { usuario, contrasena, mayorDeEdad: true });
 });
 
 btnIniciarSesion.addEventListener('click', () => {
   const usuario = usuarioInput.value.trim();
   const contrasena = contrasenaInput.value;
-  if (!usuario || !contrasena) { alert('Rellena usuario y contrasena.'); return; }
+  if (!usuario || !contrasena) { avisarAcceso('Rellena usuario y contraseña.'); return; }
   socket.emit('iniciarSesion', { usuario, contrasena });
 });
 
@@ -892,4 +891,149 @@ socket.on('privadoCerrado', ({ canalId, motivo }) => {
     delete privados[canalId];
     renderPrivados();
   }
+});
+
+
+// ================== PANTALLAS: ACCESO / CHAT ==================
+const tabLogin = document.getElementById('tabLogin');
+const tabRegistro = document.getElementById('tabRegistro');
+const filaRepetir = document.getElementById('filaRepetir');
+const ayudaRegistro = document.getElementById('ayudaRegistro');
+const avisoAcceso = document.getElementById('avisoAcceso');
+const estadoConexion = document.getElementById('estadoConexion');
+const menuUsuario = document.getElementById('menuUsuario');
+const modalMod = document.getElementById('modalMod');
+const velo = document.getElementById('velo');
+let modoAcceso = 'login';
+let yaSaludo = false;
+
+function avisarAcceso(texto) { avisoAcceso.textContent = texto || ''; }
+
+function avisarError(texto) {
+  if (document.body.dataset.vista === 'acceso') avisarAcceso(texto);
+  else alert(texto);
+}
+
+function fijarModo(modo) {
+  modoAcceso = modo;
+  tabLogin.classList.toggle('activo', modo === 'login');
+  tabRegistro.classList.toggle('activo', modo === 'registro');
+  filaRepetir.classList.toggle('oculto', modo !== 'registro');
+  ayudaRegistro.classList.toggle('oculto', modo !== 'registro');
+  btnIniciarSesion.classList.toggle('oculto', modo !== 'login');
+  btnRegistrar.classList.toggle('oculto', modo !== 'registro');
+  contrasenaInput.autocomplete = modo === 'login' ? 'current-password' : 'new-password';
+  avisarAcceso('');
+}
+
+function sincronizarRolUI() {
+  document.body.classList.toggle('es-staff', esPrivilegiado());
+  const nombre = miNick || '…';
+  const inicial = nombre.charAt(0).toUpperCase();
+  const color = miNick ? colorDeNick(miNick) : '#6D4AFF';
+  ['avatarInicial', 'menuAvatar'].forEach(id => {
+    const el = document.getElementById(id);
+    el.textContent = inicial;
+    el.style.background = color;
+  });
+  document.getElementById('chipNick').textContent = nombre;
+  document.getElementById('menuNick').textContent = nombre;
+}
+
+function cerrarDrawers() { document.body.classList.remove('drawer-salas', 'drawer-gente'); }
+
+function mostrarChat() {
+  document.body.dataset.vista = 'chat';
+  avisarAcceso('');
+  sincronizarRolUI();
+  chat.scrollTop = chat.scrollHeight;
+}
+
+function mostrarAcceso(texto) {
+  document.body.dataset.vista = 'acceso';
+  cerrarDrawers();
+  menuUsuario.classList.add('oculto');
+  modalMod.classList.add('oculto');
+  fijarModo('login');
+  if (texto) avisarAcceso(texto);
+}
+
+tabLogin.addEventListener('click', () => fijarModo('login'));
+tabRegistro.addEventListener('click', () => fijarModo('registro'));
+[usuarioInput, contrasenaInput, document.getElementById('contrasena2Input')].forEach(inp => {
+  inp.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    (modoAcceso === 'login' ? btnIniciarSesion : btnRegistrar).click();
+  });
+});
+document.getElementById('verClave').addEventListener('click', (e) => {
+  const mostrar = contrasenaInput.type === 'password';
+  contrasenaInput.type = mostrar ? 'text' : 'password';
+  document.getElementById('contrasena2Input').type = mostrar ? 'text' : 'password';
+  e.currentTarget.textContent = mostrar ? '🙈' : '👁';
+});
+document.getElementById('btnInvitado').addEventListener('click', mostrarChat);
+document.getElementById('verNormasAcceso').addEventListener('click', () => modalNormas.classList.remove('oculto'));
+
+// Estado de conexión (el servidor gratuito de Render puede tardar en despertar)
+socket.on('connect', () => { estadoConexion.textContent = 'Conectado'; estadoConexion.classList.add('ok'); });
+socket.on('disconnect', () => { estadoConexion.textContent = 'Reconectando…'; estadoConexion.classList.remove('ok'); });
+
+socket.on('sesionIniciada', () => { mostrarChat(); });
+socket.on('sesionCerrada', () => { mostrarAcceso(); sincronizarRolUI(); });
+socket.on('rolAsignado', sincronizarRolUI);
+socket.on('unido', cerrarDrawers);
+socket.on('privadoAbierto', cerrarDrawers);
+
+// Si el servidor se reinicia, la sesión en memoria se pierde: volvemos al acceso en limpio
+socket.on('bienvenida', () => {
+  if (yaSaludo && document.body.dataset.vista === 'chat') {
+    salasUnidas.clear();
+    salaActiva = null;
+    miRol = 'usuario';
+    Object.keys(mensajesPorSala).forEach(k => delete mensajesPorSala[k]);
+    Object.keys(privados).forEach(k => delete privados[k]);
+    renderPrivados();
+    cuentaAnonima.classList.remove('oculto');
+    cuentaConectada.classList.add('oculto');
+    etiquetaRol.textContent = '';
+    btnAdmin.classList.remove('oculto');
+    panelAdmin.classList.add('oculto');
+    renderListaSalas();
+    renderPestañas();
+    renderMensajes();
+    mostrarAcceso('La conexión se reinició. Vuelve a entrar para continuar.');
+  }
+  yaSaludo = true;
+  sincronizarRolUI();
+});
+
+// Menú de usuario
+document.getElementById('btnUsuario').addEventListener('click', (e) => {
+  e.stopPropagation();
+  menuUsuario.classList.toggle('oculto');
+});
+menuUsuario.addEventListener('click', (e) => { if (e.target.closest('button')) menuUsuario.classList.add('oculto'); });
+document.addEventListener('click', (e) => { if (!menuUsuario.contains(e.target)) menuUsuario.classList.add('oculto'); });
+
+// Panel de moderación (modal, solo staff)
+document.getElementById('btnPanelMod').addEventListener('click', () => {
+  modalMod.classList.remove('oculto');
+  socket.emit('pedirUsuarios');
+});
+document.getElementById('btnCerrarMod').addEventListener('click', () => modalMod.classList.add('oculto'));
+modalMod.addEventListener('click', (e) => { if (e.target === modalMod) modalMod.classList.add('oculto'); });
+
+// Cajones laterales en móvil
+document.getElementById('btnMenuSalas').addEventListener('click', () => {
+  document.body.classList.remove('drawer-gente');
+  document.body.classList.toggle('drawer-salas');
+});
+document.getElementById('btnMenuGente').addEventListener('click', () => {
+  document.body.classList.remove('drawer-salas');
+  document.body.classList.toggle('drawer-gente');
+});
+velo.addEventListener('click', cerrarDrawers);
+listaSalasEl.addEventListener('click', (e) => {
+  if (e.target.closest('button') && !e.target.closest('.btn-borrar-sala')) cerrarDrawers();
 });
