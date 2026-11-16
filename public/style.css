@@ -542,16 +542,22 @@ body.es-staff .solo-staff { display: flex !important; }
 
 .panel-emoji {
   position: absolute; bottom: 100%; left: 14px; margin-bottom: 8px;
+  width: min(380px, calc(100vw - 28px));
   background: var(--panel);
   border: 1px solid var(--borde);
   border-radius: 16px;
-  padding: 8px;
-  display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
-  max-height: 230px; overflow-y: auto;
   box-shadow: var(--sombra);
   z-index: 40;
+  display: flex; flex-direction: column;
+  overflow: hidden;
 }
-.emoji-item { border: 0; background: transparent; font-size: 22px; padding: 6px; border-radius: 10px; cursor: pointer; }
+.emoji-tabs { display: flex; gap: 2px; padding: 6px; overflow-x: auto; border-bottom: 1px solid var(--borde); flex-shrink: 0; }
+.emoji-tab { flex-shrink: 0; border: 0; background: transparent; font-size: 20px; padding: 6px 9px; border-radius: 10px; cursor: pointer; opacity: 0.65; }
+.emoji-tab:hover { opacity: 1; background: var(--pri-claro); }
+.emoji-tab.activa { opacity: 1; background: var(--pri-claro); box-shadow: inset 0 -3px 0 var(--pri); }
+.emoji-rejilla { display: grid; grid-template-columns: repeat(8, 1fr); gap: 2px; padding: 8px; max-height: 240px; overflow-y: auto; }
+.emoji-vacio { grid-column: 1 / -1; margin: 18px 6px; text-align: center; font-size: 13px; color: var(--tinta-suave); }
+.emoji-item { border: 0; background: transparent; font-size: 24px; line-height: 1.1; padding: 6px 0; border-radius: 10px; cursor: pointer; }
 .emoji-item:hover { background: var(--pri-claro); }
 
 /* ================== CHATS PRIVADOS ================== */
@@ -790,7 +796,8 @@ body.es-staff .solo-staff { display: flex !important; }
   .compositor { padding-left: 10px; padding-right: 10px; gap: 6px; }
   .btn-camara { width: 42px; height: 42px; font-size: 19px; }
   .btn-enviar { height: 42px; padding: 0 16px; }
-  .panel-emoji { grid-template-columns: repeat(6, 1fr); left: 8px; right: 8px; }
+  .panel-emoji { left: 8px; right: 8px; width: auto; }
+  .emoji-rejilla { grid-template-columns: repeat(7, 1fr); max-height: min(240px, 34vh); }
 
   .privados-contenedor { right: 8px; left: 8px; bottom: 8px; flex-direction: column; align-items: stretch; }
   .ventana-privado { width: 100%; height: 300px; }
@@ -813,4 +820,67 @@ body.es-staff .solo-staff { display: flex !important; }
   .btn-icono { width: 38px; height: 38px; }
   .menu-usuario { position: fixed; top: 64px; right: 10px; left: 10px; width: auto; }
   .acceso-caja { padding: 26px 20px 20px; border-radius: 22px; }
+}
+
+
+/* ================== CORREO, AVISOS Y EXTRAS ================== */
+.aviso-acceso.ok { color: var(--ok); }
+.solo-registrado { display: none !important; }
+body.es-registrado.correo-activo .solo-registrado { display: flex !important; }
+.modal-estrecho { max-width: 440px; }
+.modal-estrecho .modal-cuerpo { padding-bottom: 20px; }
+.toast {
+  position: fixed; left: 50%; bottom: 96px; transform: translateX(-50%);
+  max-width: min(440px, calc(100vw - 24px));
+  background: var(--degradado); color: #fff;
+  padding: 12px 18px; border-radius: 14px;
+  font-size: 14px; font-weight: 600; line-height: 1.4; text-align: center;
+  box-shadow: var(--sombra);
+  z-index: 120;
+}
+a.btn { text-decoration: none; }
+
+/* ================== AJUSTES DE PANTALLA (móvil, tablet, horizontal) ================== */
+.marca h1 { white-space: nowrap; }
+.marca { flex-shrink: 0; }
+#totalConectados[data-num]::after { content: ' en línea'; }
+.cerrar-drawer { display: none; }
+
+@media (max-width: 860px) {
+  .cerrar-drawer {
+    display: block; align-self: flex-end; flex-shrink: 0;
+    border: 0; background: var(--pri-claro); color: var(--pri);
+    font-size: 13px; font-weight: 800;
+    padding: 9px 14px; border-radius: 12px; cursor: pointer;
+  }
+}
+
+@media (max-width: 520px) {
+  #totalConectados[data-num]::after { content: ''; }
+  .estado { padding: 8px 11px; }
+  .cabecera .marca-punto { display: none; }
+  .cab-izq { gap: 8px; }
+  .txt-enviar { display: none; }
+  .btn-enviar { width: 42px; padding: 0; }
+  .compositor input[type="text"] { padding: 12px 14px; }
+}
+
+@media (max-width: 380px) {
+  .marca h1 { font-size: 17px; }
+  .cabecera { padding-left: 8px; padding-right: 8px; gap: 6px; }
+  .cabecera-derecha { gap: 5px; }
+  .btn-icono { width: 36px; height: 36px; font-size: 15px; }
+  .avatar { width: 30px; height: 30px; }
+}
+
+/* Móvil en horizontal: poca altura */
+@media (max-height: 500px) {
+  .cabecera { padding-top: max(6px, env(safe-area-inset-top)); padding-bottom: 6px; }
+  .btn-icono { width: 36px; height: 36px; }
+  .pestañas { padding: 6px 12px; }
+  .chat { padding: 10px 14px; gap: 8px; }
+  .compositor { padding-top: 6px; padding-bottom: max(8px, env(safe-area-inset-bottom)); }
+  .acceso { align-items: flex-start; }
+  .emoji-rejilla { max-height: min(150px, 38vh); }
+  .ventana-privado { height: min(260px, 70vh); }
 }

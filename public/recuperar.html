@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>La Plaza · Tu cuenta</title>
+<meta name="robots" content="noindex, nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#6D4AFF">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+<script>
+  if (localStorage.getItem('tema') === 'oscuro') document.documentElement.setAttribute('data-tema', 'oscuro');
+</script>
+</head>
+<body>
+  <main class="acceso">
+    <div class="acceso-caja">
+      <div class="acceso-logo" id="icono">🔐</div>
+      <h2 id="titulo">Comprobando enlace…</h2>
+      <p class="acceso-sub" id="sub"></p>
+
+      <form id="formNueva" class="oculto" autocomplete="off">
+        <div class="campo">
+          <label for="c1">Nueva contraseña</label>
+          <div class="campo-clave">
+            <input type="password" id="c1" maxlength="64" autocomplete="new-password">
+            <button type="button" id="ver" class="ver-clave" aria-label="Mostrar u ocultar contraseña">👁</button>
+          </div>
+        </div>
+        <div class="campo">
+          <label for="c2">Repite la contraseña</label>
+          <input type="password" id="c2" maxlength="64" autocomplete="new-password">
+        </div>
+        <p class="ayuda">Mínimo 8 caracteres. Es más segura si mezclas letras, números y símbolos.</p>
+        <p id="aviso" class="aviso-acceso" role="alert"></p>
+        <button type="submit" id="btnGuardar" class="btn btn-primario btn-ancho">Guardar contraseña</button>
+      </form>
+
+      <a href="/" id="volver" class="btn btn-fantasma btn-ancho oculto" style="margin-top:16px;text-decoration:none">Ir a La Plaza</a>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      const $ = (id) => document.getElementById(id);
+      const titulo = $('titulo'), sub = $('sub'), icono = $('icono'), form = $('formNueva'), aviso = $('aviso'), volver = $('volver');
+
+      // El enlace viaja en la parte "#" de la dirección: no se envía al servidor ni queda en registros.
+      const m = /^#([rv])=([a-f0-9]{64})$/.exec(location.hash);
+      history.replaceState(null, '', location.pathname); // se borra de la barra de direcciones
+      const modo = m && m[1];
+      const token = m && m[2];
+
+      function terminar(emoji, t, s) {
+        icono.textContent = emoji; titulo.textContent = t; sub.textContent = s;
+        form.classList.add('oculto'); volver.classList.remove('oculto');
+      }
+
+      async function enviar(url, datos) {
+        const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(datos) });
+        const d = await r.json().catch(() => ({}));
+        return { ok: r.ok, d };
+      }
+
+      if (!modo) {
+        terminar('⚠️', 'Enlace no válido', 'Abre el enlace completo que te enviamos por correo, o pide uno nuevo desde la pantalla de acceso.');
+      } else if (modo === 'v') {
+        sub.textContent = 'Un momento…';
+        enviar('/api/cuenta/verificar-correo', { token })
+          .then(({ ok, d }) => ok
+            ? terminar('✅', '¡Correo confirmado!', 'Ya puedes recuperar tu contraseña por correo si algún día la olvidas.')
+            : terminar('⚠️', 'No se pudo confirmar', d.error || 'Inténtalo de nuevo más tarde.'))
+          .catch(() => terminar('⚠️', 'Sin conexión', 'No se pudo conectar con el servidor. Inténtalo de nuevo.'));
+      } else {
+        titulo.textContent = 'Elige tu nueva contraseña';
+        sub.textContent = 'Este enlace funciona una sola vez.';
+        form.classList.remove('oculto');
+        $('c1').focus();
+      }
+
+      $('ver').addEventListener('click', (e) => {
+        const mostrar = $('c1').type === 'password';
+        $('c1').type = $('c2').type = mostrar ? 'text' : 'password';
+        e.currentTarget.textContent = mostrar ? '🙈' : '👁';
+      });
+
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        aviso.textContent = '';
+        const p1 = $('c1').value;
+        if (p1.length < 8) { aviso.textContent = 'La contraseña debe tener al menos 8 caracteres.'; return; }
+        if (p1 !== $('c2').value) { aviso.textContent = 'Las contraseñas no coinciden.'; return; }
+        $('btnGuardar').disabled = true;
+        try {
+          const { ok, d } = await enviar('/api/cuenta/restablecer', { token, contrasena: p1 });
+          if (ok) terminar('✅', 'Contraseña cambiada', 'Ya puedes iniciar sesión con tu contraseña nueva. Por seguridad, hemos cerrado las sesiones abiertas de tu cuenta.');
+          else { aviso.textContent = d.error || 'No se pudo cambiar la contraseña.'; $('btnGuardar').disabled = false; }
+        } catch (err) {
+          aviso.textContent = 'No se pudo conectar con el servidor.';
+          $('btnGuardar').disabled = false;
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

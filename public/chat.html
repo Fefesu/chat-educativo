@@ -26,7 +26,7 @@
       <h2>Bienvenido a La Plaza</h2>
       <p class="acceso-sub">Entra con tu cuenta, crea una nueva o pasa como invitado.</p>
 
-      <div class="segmentado">
+      <div class="segmentado" id="segmentado">
         <button type="button" id="tabLogin" class="activo">Iniciar sesión</button>
         <button type="button" id="tabRegistro">Crear cuenta</button>
       </div>
@@ -36,10 +36,14 @@
           <label for="usuarioInput">Nombre de usuario</label>
           <input type="text" id="usuarioInput" placeholder="Tu nick" maxlength="20" autocomplete="username" autocapitalize="none" spellcheck="false">
         </div>
-        <div class="campo">
+        <div class="campo oculto" id="filaEmail">
+          <label for="emailInput">Correo electrónico</label>
+          <input type="email" id="emailInput" placeholder="tucorreo@ejemplo.com" maxlength="254" autocomplete="email" autocapitalize="none" spellcheck="false">
+        </div>
+        <div class="campo" id="filaClave">
           <label for="contrasenaInput">Contraseña</label>
           <div class="campo-clave">
-            <input type="password" id="contrasenaInput" placeholder="Mínimo 6 caracteres" maxlength="50" autocomplete="current-password">
+            <input type="password" id="contrasenaInput" placeholder="Mínimo 8 caracteres" maxlength="50" autocomplete="current-password">
             <button type="button" id="verClave" class="ver-clave" aria-label="Mostrar u ocultar contraseña">👁</button>
           </div>
         </div>
@@ -47,11 +51,17 @@
           <label for="contrasena2Input">Repite la contraseña</label>
           <input type="password" id="contrasena2Input" maxlength="50" autocomplete="new-password">
         </div>
-        <p id="ayudaRegistro" class="ayuda oculto">Usuario de 3 a 20 caracteres: letras, números, _ . - (sin espacios). No hay recuperación por email, así que guarda bien tu contraseña.</p>
+        <p id="ayudaRegistro" class="ayuda oculto">Usuario de 3 a 20 caracteres: letras, números, _ . - (sin espacios). Contraseña de al menos 8 caracteres. Tu correo solo sirve para confirmar tu cuenta y recuperar la contraseña.</p>
+        <p id="ayudaRecuperar" class="ayuda oculto">Escribe tu usuario y el correo que confirmaste en tu cuenta. Te enviaremos un enlace para elegir una contraseña nueva.</p>
         <p id="avisoAcceso" class="aviso-acceso" role="alert"></p>
         <button type="button" id="btnIniciarSesion" class="btn btn-primario btn-ancho">Iniciar sesión</button>
         <button type="button" id="btnRegistrar" class="btn btn-primario btn-ancho oculto">Crear mi cuenta</button>
-        <p class="aviso-recuperar">¿Olvidaste tu contraseña? Contacta con el administrador del chat.</p>
+        <button type="button" id="btnRecuperar" class="btn btn-primario btn-ancho oculto">Enviar enlace al correo</button>
+        <p class="aviso-recuperar">
+          <span id="textoSinCorreo">¿Olvidaste tu contraseña? Contacta con el administrador del chat.</span>
+          <button type="button" id="btnOlvide" class="enlace oculto">¿Olvidaste tu contraseña?</button>
+          <button type="button" id="btnVolverLogin" class="enlace oculto">← Volver a iniciar sesión</button>
+        </p>
       </div>
 
       <div class="separador"><span>o</span></div>
@@ -75,7 +85,7 @@
       <div class="cabecera-derecha">
         <span class="estado" id="estado">
           <span class="estado-punto"></span>
-          <span id="totalConectados">Conectando...</span>
+          <span id="totalConectados" title="Personas conectadas">Conectando...</span>
         </span>
         <button type="button" id="btnMenuGente" class="btn-icono btn-menu-movil" aria-label="Personas en la sala">👥</button>
         <button type="button" id="btnTema" class="btn-icono" title="Cambiar tema">🌙</button>
@@ -96,6 +106,7 @@
             </div>
             <button type="button" id="btnPanelMod" class="menu-item solo-staff">🛡️ Panel de moderación</button>
             <button type="button" id="btnAdmin" class="menu-item">👑 Acceder como admin</button>
+            <button type="button" id="btnCorreo" class="menu-item solo-registrado">📧 Correo de recuperación</button>
             <button type="button" id="btnVerNormas" class="menu-item">📜 Normas y privacidad</button>
             <button type="button" id="btnCerrarSesion" class="menu-item menu-item-peligro">🚪 Salir</button>
           </div>
@@ -105,6 +116,7 @@
 
     <div class="cuerpo">
       <aside class="barra-salas">
+        <button type="button" class="cerrar-drawer" aria-label="Cerrar panel">✕ Cerrar</button>
         <div class="barra-salas-cab" id="cabeceraSalas">
           <p>Salas <span id="contadorSalas">(0/10)</span></p>
           <span class="flecha-desplegable" id="flechaSalas">▾</span>
@@ -127,12 +139,13 @@
             <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
             <input type="file" id="inputArchivo" accept="image/*" class="oculto">
             <input type="text" id="entrada" placeholder="Escribe algo con respeto y buen humor..." autocomplete="off" maxlength="400">
-            <button type="submit" class="btn-enviar">Enviar ➤</button>
+            <button type="submit" class="btn-enviar" aria-label="Enviar"><span class="txt-enviar">Enviar </span>➤</button>
           </form>
         </div>
       </main>
 
       <aside class="barra-conectados">
+        <button type="button" class="cerrar-drawer" aria-label="Cerrar panel">✕ Cerrar</button>
         <div class="conectados-cab">
           <p>En esta sala</p>
           <span id="contadorConectadosSala" class="badge-contador">0</span>
@@ -143,6 +156,30 @@
   </div>
 
   <div id="privadosContenedor" class="privados-contenedor"></div>
+
+  <!-- ============ MODAL: CORREO DE RECUPERACIÓN ============ -->
+  <div id="modalCorreo" class="modal-fondo oculto">
+    <div class="modal-caja modal-estrecho">
+      <div class="modal-cab">
+        <h2>📧 Correo de recuperación</h2>
+        <button type="button" id="btnCerrarCorreo" class="modal-cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo">
+        <p class="ayuda" id="estadoCorreo"></p>
+        <div class="campo">
+          <label for="correoNuevoInput">Correo electrónico</label>
+          <input type="email" id="correoNuevoInput" placeholder="tucorreo@ejemplo.com" maxlength="254" autocomplete="email" autocapitalize="none" spellcheck="false">
+        </div>
+        <div class="campo">
+          <label for="correoClaveInput">Tu contraseña (para comprobar que eres tú)</label>
+          <input type="password" id="correoClaveInput" maxlength="64" autocomplete="current-password">
+        </div>
+        <p id="avisoCorreo" class="aviso-acceso" role="alert"></p>
+        <button type="button" id="btnGuardarCorreo" class="btn btn-primario btn-ancho">Guardar y enviar confirmación</button>
+        <p class="ayuda">Te enviaremos un enlace para confirmar que el correo es tuyo. Hasta que lo confirmes, no podrá usarse para recuperar la contraseña.</p>
+      </div>
+    </div>
+  </div>
 
   <!-- ============ MODAL: PANEL DE MODERACIÓN (solo staff) ============ -->
   <div id="modalMod" class="modal-fondo oculto">
@@ -223,7 +260,8 @@
         <section class="landing-seccion" style="border-bottom:none;">
           <h3>🔒 Política de privacidad</h3>
           <ul class="landing-lista">
-            <li><strong>Si te registras:</strong> guardamos tu nombre de usuario y tu contraseña cifrada, y tu confirmación de mayoría de edad.</li>
+            <li><strong>Si te registras:</strong> guardamos tu nombre de usuario, tu contraseña cifrada y tu confirmación de mayoría de edad.</li>
+            <li><strong>Correo electrónico:</strong> solo para confirmar tu cuenta y poder recuperar tu contraseña. Nadie más lo ve, no se usa para publicidad y no se comparte. Para enviar esos mensajes usamos un servicio de envío de correo (Brevo), que recibe tu dirección únicamente en el momento del envío.</li>
             <li><strong>Mensajes:</strong> no se guardan de forma permanente. Las imágenes se retiran de la vista a los 3 minutos, con copia de moderación durante 24h.</li>
             <li><strong>Chats privados:</strong> 100% anónimos, se borran al cerrarse.</li>
             <li><strong>IP:</strong> solo se registra si eres bloqueado por incumplir las normas.</li>
@@ -233,6 +271,8 @@
       </div>
     </div>
   </div>
+
+  <div id="toast" class="toast oculto" role="status"></div>
 
   <script src="/socket.io/socket.io.js"></script>
   <script src="client.js"></script>

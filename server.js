@@ -4,6 +4,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const { MongoClient } = require('mongodb');
 const bcrypt = require('bcryptjs');
+const { crearRecuperacion } = require('./recuperacion');
 
 // ---- Fecha y hora en horario de España (Render trabaja en UTC) ----
 const ZONA_HORARIA = 'Europe/Madrid';
@@ -20,6 +21,11 @@ const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 5 * 1024 * 1024 });
 
+app.use((req, res, next) => {
+  res.set('Referrer-Policy', 'no-referrer');
+  res.set('X-Content-Type-Options', 'nosniff');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
@@ -78,6 +84,21 @@ function generarNick() {
 let usuariosCol = null;
 let notasStaffCol = null;
 let estadisticasCol = null;
+let tokensCuentaCol = null;
+
+const recuperacion = crearRecuperacion({
+  app,
+  bcrypt,
+  getUsuarios: () => usuariosCol,
+  getTokens: () => tokensCuentaCol,
+  // Al cambiar la contraseña: se quitan los bloqueos de la cuenta y se expulsan sus sesiones abiertas
+  alCambiarContrasena: (uClave) => {
+    intentosLogin.delete(uClave);
+    io.sockets.sockets.forEach(s => {
+      if (s.data && s.data.usuario && s.data.usuario.toLowerCase() === uClave) s.disconnect(true);
+    });
+  }
+});
 async function conectarDB() {
   if (!process.env.MONGODB_URI) {
     console.log('Aviso: no hay MONGODB_URI configurada. El registro de usuarios no estara disponible.');
@@ -98,6 +119,9 @@ async function conectarDB() {
   await baneadosCol.createIndex({ ip: 1 }, { unique: true });
   notasStaffCol = cliente.db('chat_educativo').collection('notasStaff');
   estadisticasCol = cliente.db('chat_educativo').collection('estadisticas');
+  tokensCuentaCol = cliente.db('chat_educativo').collection('tokensCuenta');
+  await tokensCuentaCol.createIndex({ expira: 1 }, { expireAfterSeconds: 0 }); // Mongo borra los enlaces caducados
+  await tokensCuentaCol.createIndex({ hash: 1 });
   await cargarBaneados();
   console.log('Conectado a la base de datos correctamente');
 }
@@ -354,6 +378,7 @@ io.on('connection', (socket) => {
   socket.data.registrado = false;
 
   socket.emit('bienvenida', { nick, totalConectados: usuariosConectados.size, salas: listaSalasPara(socket.id) });
+  socket.emit('configCuenta', { recuperacion: recuperacion.activo() });
   socket.broadcast.emit('sistema', { texto: `${nick} se ha conectado` });
   io.emit('totalConectados', usuariosConectados.size);
 
@@ -376,7 +401,7 @@ io.on('connection', (socket) => {
     emitirSalasATodos();
   });
 
-  socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad }) => {
+  socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad, email }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El registro no esta disponible ahora mismo.'); return; }
     if (!mayorDeEdad) { socket.emit('error_app', 'Debes confirmar que eres mayor de 18 años para registrarte.'); return; }
     const u = String(usuario || '').trim();
@@ -386,16 +411,27 @@ io.on('connection', (socket) => {
       socket.emit('error_app', 'El usuario debe tener 3-20 caracteres: letras, numeros, guion (-), guion bajo (_) o punto (.), sin espacios.');
       return;
     }
-    if (p.length < 6) {
-      socket.emit('error_app', 'La contrasena debe tener al menos 6 caracteres.');
-      return;
+    const errorContrasena = recuperacion.validarContrasena(p, uClave);
+    if (errorContrasena) { socket.emit('error_app', errorContrasena); return; }
+    let correo = null;
+    if (recuperacion.activo()) {
+      correo = recuperacion.normalizarEmail(email);
+      if (!recuperacion.emailValido(correo)) {
+        socket.emit('error_app', 'Escribe un correo electrónico válido. Lo necesitarás para recuperar tu contraseña.');
+        return;
+      }
     }
     try {
       const hash = await bcrypt.hash(p, 10);
-      await usuariosCol.insertOne({ usuario: u, usuarioClave: uClave, hash, rol: 'usuario', mayorDeEdad: true, creado: new Date() });
+      await usuariosCol.insertOne({ usuario: u, usuarioClave: uClave, hash, rol: 'usuario', mayorDeEdad: true, email: correo, emailVerificado: false, creado: new Date() });
       aplicarSesion(socket, u, 'usuario');
       socket.emit('sesionIniciada', { usuario: u, rol: 'usuario' });
       io.emit('sistema', { texto: `${u} se ha registrado` });
+      if (correo) {
+        const enviado = await recuperacion.enviarVerificacion({ usuario: u, usuarioClave: uClave }, correo);
+        socket.emit('estadoCorreo', { email: recuperacion.enmascarar(correo), verificado: false });
+        socket.emit('correoGuardado', { enviado });
+      }
     } catch (err) {
       if (err.code === 11000) socket.emit('error_app', 'Ese nombre de usuario ya existe (no distingue mayusculas de minusculas).');
       else socket.emit('error_app', 'No se pudo completar el registro.');
@@ -436,7 +472,26 @@ io.on('connection', (socket) => {
     intentosLogin.delete(uClave);
     aplicarSesion(socket, doc.usuario, doc.rol);
     socket.emit('sesionIniciada', { usuario: doc.usuario, rol: doc.rol });
+    socket.emit('estadoCorreo', { email: doc.email ? recuperacion.enmascarar(doc.email) : null, verificado: !!doc.emailVerificado });
     io.emit('sistema', { texto: `${doc.usuario} ha iniciado sesion` });
+  });
+
+  // ---- Añadir o cambiar el correo de recuperación (hay que repetir la contraseña) ----
+  socket.on('guardarCorreo', async ({ email, contrasena }) => {
+    if (!usuariosCol || !socket.data.registrado || !socket.data.usuario) { socket.emit('error_app', 'Inicia sesión con tu cuenta para añadir un correo.'); return; }
+    if (!recuperacion.activo()) { socket.emit('error_app', 'El envío de correos no está activo ahora mismo.'); return; }
+    const uClave = socket.data.usuario.toLowerCase();
+    if (!recuperacion.permitir('mail-cta:' + uClave, 5, 60 * 60 * 1000)) { socket.emit('error_app', 'Demasiados intentos. Inténtalo de nuevo más tarde.'); return; }
+    const nuevo = recuperacion.normalizarEmail(email);
+    if (!recuperacion.emailValido(nuevo)) { socket.emit('error_app', 'Escribe un correo electrónico válido.'); return; }
+    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
+    if (!doc || !(await bcrypt.compare(String(contrasena || ''), doc.hash))) { socket.emit('error_app', 'La contraseña no es correcta.'); return; }
+    const anterior = doc.email && doc.emailVerificado ? doc.email : null;
+    await usuariosCol.updateOne({ usuarioClave: uClave }, { $set: { email: nuevo, emailVerificado: false } });
+    const enviado = await recuperacion.enviarVerificacion(doc, nuevo);
+    if (anterior && anterior !== nuevo) recuperacion.avisarCambioCorreo(anterior, doc.usuario);
+    socket.emit('estadoCorreo', { email: recuperacion.enmascarar(nuevo), verificado: false });
+    socket.emit('correoGuardado', { enviado });
   });
 
   function aplicarSesion(socket, usuario, rol) {
@@ -589,7 +644,7 @@ io.on('connection', (socket) => {
       socket.emit('error_app', 'El usuario debe tener 3-20 caracteres: letras, numeros, guion (-), guion bajo (_) o punto (.).');
       return;
     }
-    if (p.length < 6) { socket.emit('error_app', 'La contrasena debe tener al menos 6 caracteres.'); return; }
+    { const e = recuperacion.validarContrasena(p, null); if (e) { socket.emit('error_app', e); return; } }
     try {
       const hash = await bcrypt.hash(p, 10);
       await usuariosCol.insertOne({ usuario: u, usuarioClave: uClave, hash, rol: 'moderador', mayorDeEdad: true, creado: new Date() });
@@ -662,7 +717,7 @@ io.on('connection', (socket) => {
     if (!usuariosCol) { socket.emit('error_app', 'La base de datos no esta disponible ahora mismo.'); return; }
     const uClave = String(usuario || '').trim().toLowerCase();
     const p = String(nuevaContrasena || '');
-    if (p.length < 6) { socket.emit('error_app', 'La nueva contrasena debe tener al menos 6 caracteres.'); return; }
+    { const e = recuperacion.validarContrasena(p, null); if (e) { socket.emit('error_app', e); return; } }
     const doc = await usuariosCol.findOne({ usuarioClave: uClave });
     if (!doc) { socket.emit('error_app', 'Ese usuario no existe.'); return; }
     const hash = await bcrypt.hash(p, 10);

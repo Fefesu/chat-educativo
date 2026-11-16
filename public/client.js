@@ -357,14 +357,16 @@ function agregarSistemaGlobal(texto) {
 // ---- Eventos del servidor ----
 socket.on('bienvenida', ({ nick, totalConectados: total, salas }) => {
   miNick = nick;
-  totalConectados.textContent = `${total} en línea`;
+  totalConectados.textContent = total;
+  totalConectados.dataset.num = '1';
   salasDisponibles = salas;
   renderListaSalas();
   renderPestañas();
 });
 
 socket.on('totalConectados', (n) => {
-  totalConectados.textContent = `${n} en línea`;
+  totalConectados.textContent = n;
+  totalConectados.dataset.num = '1';
 });
 
 socket.on('salasActualizadas', (salas) => {
@@ -720,7 +722,9 @@ btnRegistrar.addEventListener('click', () => {
   const contrasena = contrasenaInput.value;
   if (!usuario || !contrasena) { avisarAcceso('Rellena usuario y contraseña.'); return; }
   if (contrasena !== document.getElementById('contrasena2Input').value) { avisarAcceso('Las contraseñas no coinciden.'); return; }
-  socket.emit('registrar', { usuario, contrasena, mayorDeEdad: true });
+  if (contrasena.length < 8) { avisarAcceso('La contraseña debe tener al menos 8 caracteres.'); return; }
+  if (correoActivo && !emailInput.value.trim()) { avisarAcceso('Escribe tu correo electrónico: lo necesitarás para recuperar tu contraseña.'); return; }
+  socket.emit('registrar', { usuario, contrasena, mayorDeEdad: true, email: emailInput.value.trim() });
 });
 
 btnIniciarSesion.addEventListener('click', () => {
@@ -757,25 +761,75 @@ inputArchivo.addEventListener('change', () => {
   inputArchivo.value = '';
 });
 
-// ---- Selector de emojis ----
-const EMOJIS = ['😀','😂','😅','😉','😍','🥰','😘','😊','🙂','😇','🤩','😜','🤗','😴','😢','😭','😮','😱','😡','🤔','😏','😎','🥳','🤝','👍','👎','👏','🙌','🙏','💪','👋','✌️','🤞','❤️','💚','💙','💛','🔥','✨','⭐','🎉','🎂','🍀','☀️','🌙','☕','🍕','⚽','💬','✅'];
+// ---- Selector de emojis (por categorías, con recientes) ----
+const CATEGORIAS_EMOJI = [
+  { icono: '🕘', nombre: 'Recientes', lista: null },
+  { icono: '😀', nombre: 'Caras', lista: '😀 😃 😄 😁 😆 😅 😂 🤣 😊 😇 🙂 🙃 😉 😌 😍 🥰 😘 😗 😙 😚 😋 😛 😝 😜 🤪 🤨 🧐 🤓 😎 🤩 🥳 😏 😒 😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢 😭 😤 😠 😡 🤬 🤯 😳 🥵 🥶 😱 😨 😰 😥 😓 🤗 🤔 🤭 🤫 🤥 😶 😐 😑 😬 🙄 😯 😦 😧 😮 😲 🥱 😴 🤤 😪 😵 🤐 🥴 🤢 🤮 🤧 😷 🤒 🤕 🤑 🤠 😈 👿 🤡 💩 👻 💀 ☠️ 👽 🤖 🎃 😺 😸 😹 😻 😼 😽 🙀 😿 😾' },
+  { icono: '👍', nombre: 'Gestos', lista: '👍 👎 👊 ✊ 🤛 🤜 👏 🙌 👐 🤲 🤝 🙏 ✌️ 🤞 🤟 🤘 👌 🤏 👈 👉 👆 👇 ☝️ ✋ 🤚 🖐️ 🖖 👋 🤙 💪 🦾 ✍️ 🤳 💅 👀 👂 👃 👄 🧠 🦷 🙋 🙆 🙅 🤷 🤦 🙇 💁 🕺 💃 👯 🧑‍🤝‍🧑 👶 👦 👧 🧑 👨 👩 🧓 👴 👵' },
+  { icono: '❤️', nombre: 'Corazones', lista: '❤️ 🧡 💛 💚 💙 💜 🖤 🤍 🤎 💔 ❣️ 💕 💞 💓 💗 💖 💘 💝 💟 ♥️ 💋 💌 💐 🌹 🥀 😍 🥰 😘 😻 🫶' },
+  { icono: '🐶', nombre: 'Animales y naturaleza', lista: '🐶 🐱 🐭 🐹 🐰 🦊 🐻 🐼 🐨 🐯 🦁 🐮 🐷 🐸 🐵 🙈 🙉 🙊 🐔 🐧 🐦 🐤 🦆 🦅 🦉 🦇 🐺 🐗 🐴 🦄 🐝 🐛 🦋 🐌 🐞 🐜 🐢 🐍 🦎 🐙 🦑 🦐 🦀 🐡 🐠 🐟 🐬 🐳 🐋 🦈 🐊 🐅 🐆 🦓 🦍 🐘 🦒 🐪 🐑 🐐 🐕 🐈 🐓 🦜 🕊️ 🐇 🐿️ 🦔 🌸 🌹 🌺 🌻 🌼 🌷 🌱 🌲 🌳 🌴 🌵 🍀 🍁 🍂 🍃 🌾 ☘️ ☀️ 🌤️ ⛅ 🌈 ☁️ 🌧️ ⛈️ ❄️ ⛄ 🔥 💧 🌊 🌙 ⭐ 🌟 ✨ ⚡ 🌍' },
+  { icono: '🍕', nombre: 'Comida y bebida', lista: '🍏 🍎 🍐 🍊 🍋 🍌 🍉 🍇 🍓 🍈 🍒 🍑 🥭 🍍 🥥 🥝 🍅 🍆 🥑 🥦 🥕 🌽 🌶️ 🥔 🍠 🥐 🍞 🥖 🧀 🥚 🍳 🥞 🥓 🥩 🍗 🍖 🌭 🍔 🍟 🍕 🥪 🌮 🌯 🥗 🍝 🍜 🍲 🍛 🍣 🍱 🥟 🍤 🍙 🍚 🍘 🍥 🍢 🍡 🍧 🍨 🍦 🥧 🍰 🎂 🍮 🍭 🍬 🍫 🍿 🍩 🍪 🌰 🥜 🍯 🥛 🍼 ☕ 🍵 🥤 🍶 🍺 🍻 🥂 🍷 🥃 🍸 🍹 🍾 🧊 🍴 🥄' },
+  { icono: '⚽', nombre: 'Deporte y ocio', lista: '⚽ 🏀 🏈 ⚾ 🥎 🎾 🏐 🏉 🎱 🏓 🏸 🥅 🏒 🏑 🥍 🏏 ⛳ 🏹 🎣 🥊 🥋 🎽 🛹 ⛸️ 🎿 🏂 🏋️ 🤸 🚴 🏊 🎮 🕹️ 🎲 🧩 🎯 🎳 🎭 🎨 🎬 🎤 🎧 🎼 🎹 🥁 🎷 🎺 🎸 🎻 🏆 🥇 🥈 🥉 🏅 🎖️ 🎪 🎉 🎊 🎈 🎁 🎀' },
+  { icono: '🚗', nombre: 'Viajes y lugares', lista: '🚗 🚕 🚙 🚌 🚎 🏎️ 🚓 🚑 🚒 🚚 🚜 🛵 🏍️ 🚲 🛴 🚂 🚆 🚇 🚈 ✈️ 🛫 🛬 🚀 🛸 🚁 ⛵ 🚤 🛳️ ⚓ 🏠 🏡 🏢 🏥 🏫 🏰 🗼 🗽 ⛪ 🕌 🌋 🏖️ 🏝️ ⛺ 🌃 🌉 🎡 🎢 🗺️ 🧭' },
+  { icono: '💡', nombre: 'Objetos', lista: '💡 📱 💻 🖥️ ⌨️ 🖱️ 📷 📸 📹 🎥 📺 📻 ⏰ ⌚ 🔋 🔌 💰 💵 💳 💎 🔧 🔨 ⚙️ 🔒 🔓 🔑 📚 📖 📝 ✏️ 🖊️ 📌 📎 ✂️ 📦 📬 📧 💼 🎒 👓 🕶️ 👑 👒 🎩 🧢 👕 👖 👗 👟 👠 💄 💍 🌂 ☂️ 🧳 🛒 🧸 🕯️' },
+  { icono: '🔣', nombre: 'Símbolos', lista: '✅ ❌ ❎ ⭕ ❗ ❓ ❕ ❔ ‼️ ⁉️ 💯 💥 💫 💦 💨 💤 💢 💬 💭 🗯️ ➕ ➖ ➗ ✖️ ♻️ ⚠️ 🚫 ⛔ 🔞 🆗 🆒 🆕 🆓 🔴 🟠 🟡 🟢 🔵 🟣 ⚫ ⚪ ▶️ ⏸️ ⏹️ ⏩ ⏪ 🔁 🔀 🔔 🔕 📣 🎵 🎶 ➡️ ⬅️ ⬆️ ⬇️ ↗️ ↘️ ✔️ ☑️ 💲' }
+].map(cat => ({ ...cat, lista: cat.lista ? cat.lista.split(/\s+/).filter(Boolean) : null }));
+
+const CLAVE_RECIENTES = 'emojisRecientes';
+function leerRecientes() {
+  try { const l = JSON.parse(localStorage.getItem(CLAVE_RECIENTES)); return Array.isArray(l) ? l : []; } catch (e) { return []; }
+}
+function guardarReciente(emoji) {
+  try { localStorage.setItem(CLAVE_RECIENTES, JSON.stringify([emoji, ...leerRecientes().filter(x => x !== emoji)].slice(0, 24))); } catch (e) { /* sin almacenamiento: no pasa nada */ }
+}
+
 const btnEmoji = document.getElementById('btnEmoji');
 const panelEmoji = document.getElementById('panelEmoji');
-panelEmoji.innerHTML = EMOJIS.map(e => `<button type="button" class="emoji-item">${e}</button>`).join('');
+panelEmoji.innerHTML =
+  `<div class="emoji-tabs">${CATEGORIAS_EMOJI.map((cat, i) => `<button type="button" class="emoji-tab" data-i="${i}" title="${cat.nombre}">${cat.icono}</button>`).join('')}</div>` +
+  '<div class="emoji-rejilla"></div>';
+const rejillaEmoji = panelEmoji.querySelector('.emoji-rejilla');
+const tabsEmoji = panelEmoji.querySelectorAll('.emoji-tab');
+
+function mostrarCategoriaEmoji(i) {
+  const lista = CATEGORIAS_EMOJI[i].lista || leerRecientes();
+  rejillaEmoji.innerHTML = lista.length
+    ? lista.map(e => `<button type="button" class="emoji-item">${e}</button>`).join('')
+    : '<p class="emoji-vacio">Aquí aparecerán los emojis que uses.</p>';
+  tabsEmoji.forEach((t, j) => t.classList.toggle('activa', j === i));
+  rejillaEmoji.scrollTop = 0;
+}
 
 btnEmoji.addEventListener('click', (e) => {
   e.stopPropagation();
+  const abrir = panelEmoji.classList.contains('oculto');
   panelEmoji.classList.toggle('oculto');
+  if (abrir) mostrarCategoriaEmoji(leerRecientes().length ? 0 : 1);
 });
+
 panelEmoji.addEventListener('click', (e) => {
-  if (e.target.classList.contains('emoji-item')) {
-    entrada.value += e.target.textContent;
-    entrada.focus();
-    panelEmoji.classList.add('oculto');
+  const tab = e.target.closest('.emoji-tab');
+  if (tab) { mostrarCategoriaEmoji(Number(tab.dataset.i)); return; }
+  const item = e.target.closest('.emoji-item');
+  if (!item) return;
+  const emoji = item.textContent;
+  if (entrada.value.length + emoji.length > entrada.maxLength) return;
+  const ini = entrada.selectionStart;
+  const fin = entrada.selectionEnd;
+  if (ini == null) {
+    entrada.value += emoji;
+  } else {
+    entrada.value = entrada.value.slice(0, ini) + emoji + entrada.value.slice(fin);
+    entrada.setSelectionRange(ini + emoji.length, ini + emoji.length);
   }
+  guardarReciente(emoji);
+  // El panel se queda abierto para poder elegir varios; en móvil no se enfoca para no abrir el teclado
+  if (!window.matchMedia('(pointer: coarse)').matches) entrada.focus();
 });
+
 document.addEventListener('click', (e) => {
-  if (!panelEmoji.contains(e.target) && e.target !== btnEmoji) panelEmoji.classList.add('oculto');
+  const ruta = e.composedPath();
+  if (!ruta.includes(panelEmoji) && !ruta.includes(btnEmoji)) panelEmoji.classList.add('oculto');
 });
 
 // ---- Chats privados (ventanas flotantes, maximo 2 a la vez) ----
@@ -906,28 +960,57 @@ const modalMod = document.getElementById('modalMod');
 const velo = document.getElementById('velo');
 let modoAcceso = 'login';
 let yaSaludo = false;
+let correoActivo = false;
+let estadoCorreoActual = null;
+const emailInput = document.getElementById('emailInput');
+const filaEmail = document.getElementById('filaEmail');
+const filaClave = document.getElementById('filaClave');
+const segmentado = document.getElementById('segmentado');
+const btnRecuperar = document.getElementById('btnRecuperar');
+const btnOlvide = document.getElementById('btnOlvide');
+const btnVolverLogin = document.getElementById('btnVolverLogin');
+const textoSinCorreo = document.getElementById('textoSinCorreo');
+const ayudaRecuperar = document.getElementById('ayudaRecuperar');
+const modalCorreo = document.getElementById('modalCorreo');
+const avisoCorreo = document.getElementById('avisoCorreo');
 
-function avisarAcceso(texto) { avisoAcceso.textContent = texto || ''; }
+function avisarAcceso(texto, correcto) {
+  avisoAcceso.textContent = texto || '';
+  avisoAcceso.classList.toggle('ok', !!correcto);
+}
 
 function avisarError(texto) {
   if (document.body.dataset.vista === 'acceso') avisarAcceso(texto);
+  else if (!modalCorreo.classList.contains('oculto')) { avisoCorreo.textContent = texto; avisoCorreo.classList.remove('ok'); }
   else alert(texto);
 }
 
-function fijarModo(modo) {
+function fijarModo(modo, conservarAviso) {
   modoAcceso = modo;
-  tabLogin.classList.toggle('activo', modo === 'login');
-  tabRegistro.classList.toggle('activo', modo === 'registro');
-  filaRepetir.classList.toggle('oculto', modo !== 'registro');
-  ayudaRegistro.classList.toggle('oculto', modo !== 'registro');
-  btnIniciarSesion.classList.toggle('oculto', modo !== 'login');
-  btnRegistrar.classList.toggle('oculto', modo !== 'registro');
-  contrasenaInput.autocomplete = modo === 'login' ? 'current-password' : 'new-password';
-  avisarAcceso('');
+  const login = modo === 'login';
+  const registro = modo === 'registro';
+  const recuperar = modo === 'recuperar';
+  tabLogin.classList.toggle('activo', !registro);
+  tabRegistro.classList.toggle('activo', registro);
+  segmentado.classList.toggle('oculto', recuperar);
+  filaEmail.classList.toggle('oculto', !(recuperar || (registro && correoActivo)));
+  filaClave.classList.toggle('oculto', recuperar);
+  filaRepetir.classList.toggle('oculto', !registro);
+  ayudaRegistro.classList.toggle('oculto', !registro);
+  ayudaRecuperar.classList.toggle('oculto', !recuperar);
+  btnIniciarSesion.classList.toggle('oculto', !login);
+  btnRegistrar.classList.toggle('oculto', !registro);
+  btnRecuperar.classList.toggle('oculto', !recuperar);
+  btnOlvide.classList.toggle('oculto', !(login && correoActivo));
+  btnVolverLogin.classList.toggle('oculto', !recuperar);
+  textoSinCorreo.classList.toggle('oculto', correoActivo || recuperar);
+  contrasenaInput.autocomplete = login ? 'current-password' : 'new-password';
+  if (!conservarAviso) avisarAcceso('');
 }
 
 function sincronizarRolUI() {
   document.body.classList.toggle('es-staff', esPrivilegiado());
+  document.body.classList.toggle('es-registrado', !cuentaConectada.classList.contains('oculto'));
   const nombre = miNick || '…';
   const inicial = nombre.charAt(0).toUpperCase();
   const color = miNick ? colorDeNick(miNick) : '#6D4AFF';
@@ -954,16 +1037,17 @@ function mostrarAcceso(texto) {
   cerrarDrawers();
   menuUsuario.classList.add('oculto');
   modalMod.classList.add('oculto');
+  modalCorreo.classList.add('oculto');
   fijarModo('login');
   if (texto) avisarAcceso(texto);
 }
 
 tabLogin.addEventListener('click', () => fijarModo('login'));
 tabRegistro.addEventListener('click', () => fijarModo('registro'));
-[usuarioInput, contrasenaInput, document.getElementById('contrasena2Input')].forEach(inp => {
+[usuarioInput, emailInput, contrasenaInput, document.getElementById('contrasena2Input')].forEach(inp => {
   inp.addEventListener('keydown', (e) => {
     if (e.key !== 'Enter') return;
-    (modoAcceso === 'login' ? btnIniciarSesion : btnRegistrar).click();
+    ({ login: btnIniciarSesion, registro: btnRegistrar, recuperar: btnRecuperar })[modoAcceso].click();
   });
 });
 document.getElementById('verClave').addEventListener('click', (e) => {
@@ -1034,6 +1118,94 @@ document.getElementById('btnMenuGente').addEventListener('click', () => {
   document.body.classList.toggle('drawer-gente');
 });
 velo.addEventListener('click', cerrarDrawers);
+document.querySelectorAll('.cerrar-drawer').forEach(b => b.addEventListener('click', cerrarDrawers));
 listaSalasEl.addEventListener('click', (e) => {
   if (e.target.closest('button') && !e.target.closest('.btn-borrar-sala')) cerrarDrawers();
+});
+
+
+// ================== CORREO DE RECUPERACIÓN ==================
+function aplicarConfigCorreo() {
+  document.body.classList.toggle('correo-activo', correoActivo);
+  fijarModo(modoAcceso, true);
+}
+socket.on('configCuenta', (d) => { correoActivo = !!(d && d.recuperacion); aplicarConfigCorreo(); });
+
+btnOlvide.addEventListener('click', () => fijarModo('recuperar'));
+btnVolverLogin.addEventListener('click', () => fijarModo('login'));
+
+btnRecuperar.addEventListener('click', async () => {
+  const usuario = usuarioInput.value.trim();
+  const email = emailInput.value.trim();
+  if (!usuario || !email) { avisarAcceso('Escribe tu usuario y tu correo.'); return; }
+  btnRecuperar.disabled = true;
+  try {
+    const r = await fetch('/api/cuenta/recuperar', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario, email })
+    });
+    const d = await r.json().catch(() => ({}));
+    avisarAcceso(r.ok ? d.mensaje : (d.error || 'No se pudo enviar. Inténtalo de nuevo.'), r.ok);
+  } catch (e) {
+    avisarAcceso('No se pudo conectar con el servidor.');
+  }
+  setTimeout(() => { btnRecuperar.disabled = false; }, 20000);
+});
+
+let temporizadorToast = null;
+function mostrarToast(texto) {
+  const t = document.getElementById('toast');
+  t.textContent = texto;
+  t.classList.remove('oculto');
+  clearTimeout(temporizadorToast);
+  temporizadorToast = setTimeout(() => t.classList.add('oculto'), 7000);
+}
+
+function pintarEstadoCorreo() {
+  const el = document.getElementById('estadoCorreo');
+  const d = estadoCorreoActual;
+  if (!d || !d.email) el.textContent = 'Todavía no tienes un correo de recuperación. Sin él, si olvidas la contraseña tendrías que pedírsela al administrador.';
+  else if (d.verificado) el.textContent = `✅ Correo confirmado: ${d.email}. Puedes cambiarlo escribiendo otro abajo.`;
+  else el.textContent = `⏳ Pendiente de confirmar: ${d.email}. Abre el enlace que te enviamos (mira también el spam).`;
+}
+
+socket.on('estadoCorreo', (d) => {
+  estadoCorreoActual = d;
+  if (!modalCorreo.classList.contains('oculto')) pintarEstadoCorreo();
+});
+
+socket.on('correoGuardado', (d) => {
+  document.getElementById('correoClaveInput').value = '';
+  const texto = d.enviado
+    ? '📧 Te hemos enviado un correo para confirmar tu dirección. Revisa también el spam.'
+    : '⚠️ No hemos podido enviar el correo ahora mismo. Inténtalo más tarde desde "Correo de recuperación".';
+  if (!modalCorreo.classList.contains('oculto')) {
+    avisoCorreo.textContent = texto;
+    avisoCorreo.classList.toggle('ok', !!d.enviado);
+    pintarEstadoCorreo();
+  } else {
+    mostrarToast(texto);
+  }
+});
+
+document.getElementById('btnCorreo').addEventListener('click', () => {
+  pintarEstadoCorreo();
+  avisoCorreo.textContent = '';
+  document.getElementById('correoNuevoInput').value = '';
+  document.getElementById('correoClaveInput').value = '';
+  modalCorreo.classList.remove('oculto');
+});
+document.getElementById('btnCerrarCorreo').addEventListener('click', () => modalCorreo.classList.add('oculto'));
+modalCorreo.addEventListener('click', (e) => { if (e.target === modalCorreo) modalCorreo.classList.add('oculto'); });
+
+document.getElementById('btnGuardarCorreo').addEventListener('click', (e) => {
+  const email = document.getElementById('correoNuevoInput').value.trim();
+  const contrasena = document.getElementById('correoClaveInput').value;
+  if (!email || !contrasena) { avisoCorreo.textContent = 'Escribe el correo y tu contraseña.'; avisoCorreo.classList.remove('ok'); return; }
+  avisoCorreo.textContent = '';
+  const boton = e.currentTarget;
+  boton.disabled = true;
+  setTimeout(() => { boton.disabled = false; }, 4000);
+  socket.emit('guardarCorreo', { email, contrasena });
 });
