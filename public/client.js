@@ -1101,9 +1101,36 @@ menuUsuario.addEventListener('click', (e) => { if (e.target.closest('button')) m
 document.addEventListener('click', (e) => { if (!menuUsuario.contains(e.target)) menuUsuario.classList.add('oculto'); });
 
 // Panel de moderación (modal, solo staff)
+let intervaloEquipo = null;
 document.getElementById('btnPanelMod').addEventListener('click', () => {
   modalMod.classList.remove('oculto');
   socket.emit('pedirUsuarios');
+  socket.emit('pedirEquipo');
+  clearInterval(intervaloEquipo);
+  // Mientras el panel está abierto, la lista se refresca sola cada pocos segundos
+  intervaloEquipo = setInterval(() => {
+    if (modalMod.classList.contains('oculto')) { clearInterval(intervaloEquipo); return; }
+    socket.emit('pedirEquipo');
+  }, 8000);
+});
+
+socket.on('listaEquipo', ({ equipo, porSala, moderadores, maxModeradores }) => {
+  document.getElementById('tituloEquipo').textContent = `🛡️ Equipo de moderación · ${moderadores}/${maxModeradores} moderadores`;
+  document.getElementById('listaEquipo').innerHTML = equipo.length
+    ? equipo.map(e => {
+        const donde = !e.conectado ? 'desconectado' : (e.salas.length ? 'en ' + e.salas.map(escapar).join(', ') : 'conectado, sin entrar en ninguna sala');
+        return `<div class="fila-equipo"><span class="punto-conexion ${e.conectado ? 'online' : 'ausente'}"></span>` +
+               `<span class="equipo-nombre">${escapar(e.usuario)} <small>· ${e.rol === 'admin' ? 'admin' : 'moderador'}</small></span>` +
+               `<span class="equipo-detalle">${donde}</span></div>`;
+      }).join('')
+    : '<p class="ayuda">Todavía no hay moderadores.</p>';
+  document.getElementById('listaCoberturaSalas').innerHTML = porSala.length
+    ? porSala.map(s => {
+        const quien = s.staff.length ? '🛡️ ' + s.staff.map(escapar).join(', ') : '<span class="equipo-alerta">⚠️ sin moderación presente</span>';
+        return `<div class="fila-equipo"><span class="equipo-nombre">${escapar(s.nombre)} <small>· ${s.personas} ${s.personas === 1 ? 'persona' : 'personas'}</small></span>` +
+               `<span class="equipo-detalle">${quien}</span></div>`;
+      }).join('')
+    : '<p class="ayuda">No hay salas abiertas ahora mismo.</p>';
 });
 document.getElementById('btnCerrarMod').addEventListener('click', () => modalMod.classList.add('oculto'));
 modalMod.addEventListener('click', (e) => { if (e.target === modalMod) modalMod.classList.add('oculto'); });

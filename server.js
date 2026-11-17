@@ -244,6 +244,44 @@ function listaUsuarios() {
   }));
 }
 
+// Moderadores que existen de verdad (cuentas guardadas), no solo los conectados ahora
+async function totalModeradores() {
+  if (!usuariosCol) return moderadores.size;
+  return usuariosCol.countDocuments({ rol: 'moderador' });
+}
+
+// Equipo de moderación: quién es admin/moderador, si está conectado y en qué salas está ahora.
+// Los roles valen para todo el chat; lo que cambia por sala es quién está presente en ella.
+async function datosEquipo() {
+  const vivos = [];
+  io.sockets.sockets.forEach((s) => { if (esModOAdmin(s.id) && s.data.usuario) vivos.push(s); });
+  const salasVisibles = Array.from(salas.values()).filter(sl => !sl.oculta);
+
+  const mapa = new Map();
+  if (usuariosCol) {
+    const cuentas = await usuariosCol.find({ rol: { $in: ['admin', 'moderador'] } }).toArray();
+    cuentas.forEach(c => mapa.set(c.usuarioClave, { usuario: c.usuario, rol: c.rol, conectado: false, salas: [] }));
+  }
+  vivos.forEach((s) => {
+    const clave = s.data.usuario.toLowerCase();
+    const e = mapa.get(clave) || { usuario: s.data.usuario, conectado: false, salas: [] };
+    e.rol = rolDe(s.id);
+    e.conectado = true;
+    e.salas = salasVisibles.filter(sl => sl.usuarios.has(s.id)).map(sl => sl.nombre);
+    mapa.set(clave, e);
+  });
+  const orden = { admin: 0, moderador: 1 };
+  const equipo = Array.from(mapa.values()).sort((a, b) =>
+    (orden[a.rol] - orden[b.rol]) || (Number(b.conectado) - Number(a.conectado)) || a.usuario.localeCompare(b.usuario));
+
+  const porSala = salasVisibles.map(sl => ({
+    nombre: sl.nombre,
+    personas: sl.usuarios.size,
+    staff: vivos.filter(s => sl.usuarios.has(s.id)).map(s => s.data.usuario)
+  }));
+  return { equipo, porSala, moderadores: equipo.filter(e => e.rol === 'moderador').length, maxModeradores: MAX_MODERADORES };
+}
+
 function rolDe(socketId) {
   return socketId === adminSocketId ? 'admin' : (moderadores.has(socketId) ? 'moderador' : 'usuario');
 }
@@ -636,7 +674,7 @@ io.on('connection', (socket) => {
   socket.on('crearCuentaModerador', async ({ usuario, contrasena }) => {
     if (socket.id !== adminSocketId) return;
     if (!usuariosCol) { socket.emit('error_app', 'La base de datos no esta disponible ahora mismo.'); return; }
-    if (moderadores.size >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
+    if ((await totalModeradores()) >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
     const u = String(usuario || '').trim();
     const uClave = u.toLowerCase();
     const p = String(contrasena || '');
@@ -657,7 +695,7 @@ io.on('connection', (socket) => {
 
   socket.on('asignarModerador', async ({ nickObjetivo }) => {
     if (socket.id !== adminSocketId) return;
-    if (moderadores.size >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
+    if ((await totalModeradores()) >= MAX_MODERADORES) { socket.emit('error_app', 'Ya hay 5 moderadores, el maximo permitido.'); return; }
     const uClave = String(nickObjetivo || '').trim().toLowerCase();
     let nombreReal = nickObjetivo;
     if (usuariosCol) {
@@ -919,6 +957,11 @@ io.on('connection', (socket) => {
   socket.on('pedirUsuariosDeSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (sala) socket.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
+  });
+
+  socket.on('pedirEquipo', async () => {
+    if (!esModOAdmin(socket.id)) return;
+    try { socket.emit('listaEquipo', await datosEquipo()); } catch (e) { console.error('Equipo:', e.message); }
   });
 
   socket.on('pedirUsuarios', () => {

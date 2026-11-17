@@ -884,3 +884,20 @@ a.btn { text-decoration: none; }
   .emoji-rejilla { max-height: min(150px, 38vh); }
   .ventana-privado { height: min(260px, 70vh); }
 }
+
+/* ================== EQUIPO DE MODERACIÓN ================== */
+.fila-equipo {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-size: 13px;
+  background: var(--panel); border: 1px solid var(--borde);
+  border-radius: 10px; padding: 8px 10px;
+}
+.equipo-nombre { font-weight: 700; }
+.equipo-nombre small { color: var(--tinta-suave); font-weight: 600; }
+.equipo-detalle { margin-left: auto; color: var(--tinta-suave); text-align: right; }
+.equipo-alerta { color: var(--peligro); font-weight: 700; }
+.punto-conexion.ausente { background: var(--tinta-suave); opacity: 0.45; }
+@media (max-width: 520px) { .equipo-detalle { margin-left: 0; text-align: left; flex-basis: 100%; } }
+
+/* Listas cortas del panel: se muestran completas, sin scroll interno */
+#listaEquipo, #listaCoberturaSalas { max-height: none; overflow: visible; }

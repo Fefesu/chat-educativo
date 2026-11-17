@@ -39,8 +39,11 @@ function crearRecuperacion({ app, bcrypt, getUsuarios, getTokens, alCambiarContr
     }
   }, 10 * 60 * 1000).unref();
 
-  // Render añade la IP real al final de X-Forwarded-For; la primera puede venir falsificada.
+  // Render pasa todo el tráfico por Cloudflare, que escribe la IP real del visitante en CF-Connecting-IP
+  // (y no se puede falsificar a través de él). Si no viene, se usa el último valor de X-Forwarded-For.
   function ipDe(req) {
+    const cf = String(req.headers['cf-connecting-ip'] || '').trim();
+    if (cf) return cf;
     const partes = String(req.headers['x-forwarded-for'] || '').split(',').map(s => s.trim()).filter(Boolean);
     return partes.length ? partes[partes.length - 1] : (req.socket.remoteAddress || '');
   }
