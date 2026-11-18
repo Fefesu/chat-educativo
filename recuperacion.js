@@ -138,6 +138,14 @@ ${url ? `<p style="margin:22px 0"><a href="${esc(url)}" style="background:#6D4AF
     }));
   }
 
+  function avisarEliminacion(email, usuario) {
+    return enviarCorreo(email, 'Tu cuenta de La Plaza se ha eliminado', plantilla({
+      titulo: 'Cuenta eliminada',
+      parrafos: [`La cuenta "${usuario}" y sus datos se han eliminado de La Plaza.`, 'Si no has sido tú, contacta cuanto antes con laplazaayuda@gmail.com.'],
+      pie: 'Este aviso se envía automáticamente por seguridad.'
+    }));
+  }
+
   // ---------- Rutas web ----------
   const noCache = (res) => res.set('Cache-Control', 'no-store');
 
@@ -240,7 +248,7 @@ ${url ? `<p style="margin:22px 0"><a href="${esc(url)}" style="background:#6D4AF
     }
   });
 
-  return { activo, permitir, normalizarEmail, emailValido, enmascarar, validarContrasena, enviarVerificacion, avisarCambioCorreo };
+  return { activo, permitir, normalizarEmail, emailValido, enmascarar, validarContrasena, enviarVerificacion, avisarCambioCorreo, avisarEliminacion };
 }
 
 module.exports = { crearRecuperacion, MIN_CONTRASENA, MAX_CONTRASENA };

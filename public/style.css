@@ -901,3 +901,19 @@ a.btn { text-decoration: none; }
 
 /* Listas cortas del panel: se muestran completas, sin scroll interno */
 #listaEquipo, #listaCoberturaSalas { max-height: none; overflow: visible; }
+
+/* ================== LOTE: La Plaza, eliminar cuenta, imágenes, diagnóstico ================== */
+.solo-cuenta { display: none !important; }
+body.es-registrado .solo-cuenta { display: flex !important; }
+.solo-admin { display: none; }
+body.es-admin .solo-admin { display: block; }
+.fila-checkbox { display: flex; align-items: flex-start; gap: 10px; margin-top: 14px; font-size: 13px; font-weight: 600; cursor: pointer; }
+.fila-checkbox input { width: 18px; height: 18px; margin-top: 1px; accent-color: var(--peligro); flex-shrink: 0; }
+.btn-peligro { background: var(--peligro); color: #fff; box-shadow: 0 8px 20px rgba(229, 72, 77, 0.3); }
+.btn-peligro:hover { filter: brightness(1.08); }
+.visor-imagen img { display: block; max-width: 100%; max-height: 55vh; margin: 8px auto 14px; border-radius: 12px; background: var(--fondo-chat); }
+.visor-acciones { display: flex; gap: 10px; flex-wrap: wrap; }
+.visor-acciones .btn { flex: 1; min-width: 150px; padding: 12px 14px; font-size: 14px; }
+.btn-ver-imagen { margin-left: 8px; }
+.diag { margin: 10px 0 0; padding: 12px; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre; }
+#listaImagenes { max-height: 220px; overflow-y: auto; }

@@ -108,6 +108,7 @@
             <button type="button" id="btnAdmin" class="menu-item">👑 Acceder como admin</button>
             <button type="button" id="btnCorreo" class="menu-item solo-registrado">📧 Correo de recuperación</button>
             <button type="button" id="btnVerNormas" class="menu-item">📜 Normas y privacidad</button>
+            <button type="button" id="btnEliminarCuenta" class="menu-item menu-item-peligro solo-cuenta">🗑️ Eliminar mi cuenta</button>
             <button type="button" id="btnCerrarSesion" class="menu-item menu-item-peligro">🚪 Salir</button>
           </div>
         </div>
@@ -181,6 +182,29 @@
     </div>
   </div>
 
+  <!-- ============ MODAL: ELIMINAR CUENTA ============ -->
+  <div id="modalEliminar" class="modal-fondo oculto">
+    <div class="modal-caja modal-estrecho">
+      <div class="modal-cab">
+        <h2>🗑️ Eliminar mi cuenta</h2>
+        <button type="button" id="btnCerrarEliminar" class="modal-cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo">
+        <p class="ayuda">Se borrarán tu usuario, tu contraseña y tu correo de recuperación. No se puede deshacer. Después podrás entrar como invitado o crear otra cuenta.</p>
+        <div class="campo">
+          <label for="eliminarClaveInput">Tu contraseña</label>
+          <input type="password" id="eliminarClaveInput" maxlength="64" autocomplete="current-password">
+        </div>
+        <label class="fila-checkbox">
+          <input type="checkbox" id="eliminarConfirma">
+          <span>Entiendo que mi cuenta se eliminará para siempre.</span>
+        </label>
+        <p id="avisoEliminar" class="aviso-acceso" role="alert"></p>
+        <button type="button" id="btnConfirmarEliminar" class="btn btn-peligro btn-ancho">Eliminar mi cuenta definitivamente</button>
+      </div>
+    </div>
+  </div>
+
   <!-- ============ MODAL: PANEL DE MODERACIÓN (solo staff) ============ -->
   <div id="modalMod" class="modal-fondo oculto">
     <div class="modal-caja">
@@ -194,6 +218,9 @@
           <div id="listaEquipo" class="lista-usuarios-admin"></div>
           <p class="panel-admin-subtitulo">Quién hay en cada sala ahora mismo</p>
           <div id="listaCoberturaSalas" class="lista-usuarios-admin"></div>
+          <p class="panel-admin-subtitulo">🖼️ Imágenes enviadas (últimas 24 h)</p>
+          <div id="listaImagenes" class="lista-usuarios-admin"></div>
+          <p class="ayuda">Aquí puedes revisar las imágenes que se han enviado aunque ya hayan desaparecido de la sala. Se guardan como máximo 24 horas y un máximo de 40.</p>
           <p class="ayuda">Los moderadores lo son en todas las salas. Aquí ves quién está dentro de cada una en este momento. Solo lo ve el equipo: para el resto de personas, admin y moderadores son indistinguibles.</p>
 
           <div id="seccionAsignarMod" class="form-crear-sala">
@@ -218,6 +245,12 @@
           </div>
           <div id="listaUsuariosAdmin" class="lista-usuarios-admin"></div>
 
+          <div class="solo-admin">
+            <p class="panel-admin-subtitulo">🔧 Diagnóstico de conexión (solo admin)</p>
+            <button type="button" id="btnDiagIP">Ver cómo me ve el servidor</button>
+            <pre id="salidaDiagIP" class="diag oculto"></pre>
+          </div>
+
           <div class="barra-salas-cab" id="cabeceraBaneados">
             <p>IPs bloqueadas</p>
             <span class="flecha-desplegable" id="flechaBaneados">▸</span>
@@ -229,6 +262,24 @@
             <span class="flecha-desplegable" id="flechaStats">▸</span>
           </div>
           <div id="panelStats" class="lista-usuarios-admin plegada"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: VISOR DE IMAGEN (staff) ============ -->
+  <div id="modalImagen" class="modal-fondo oculto">
+    <div class="modal-caja">
+      <div class="modal-cab">
+        <h2>🖼️ Imagen enviada</h2>
+        <button type="button" id="btnCerrarImagen" class="modal-cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo visor-imagen">
+        <p class="ayuda" id="visorInfo"></p>
+        <img id="visorImg" alt="Imagen enviada a una sala">
+        <div class="visor-acciones">
+          <button type="button" id="btnRetirarImagen" class="btn btn-fantasma">🗑 Retirar del chat</button>
+          <button type="button" id="btnBloquearAutor" class="btn btn-peligro">🚫 Bloquear IP del autor</button>
         </div>
       </div>
     </div>

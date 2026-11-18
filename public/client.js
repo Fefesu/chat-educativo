@@ -314,7 +314,7 @@ function renderListaSalas() {
     div.className = 'item-sala' + (s.id === salaActiva && (unido || esPrivilegiado()) ? ' activa' : '');
     div.style.setProperty('--c', colorDeSala(s.id));
     div.innerHTML = `
-      <span>${s.permanente ? '🔒 ' : ''}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
+      <span>${s.fija ? '🏛️ ' : (s.permanente ? '🔒 ' : '')}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
     `;
     const btn = document.createElement('button');
     if (esPrivilegiado()) {
@@ -982,6 +982,7 @@ function avisarAcceso(texto, correcto) {
 function avisarError(texto) {
   if (document.body.dataset.vista === 'acceso') avisarAcceso(texto);
   else if (!modalCorreo.classList.contains('oculto')) { avisoCorreo.textContent = texto; avisoCorreo.classList.remove('ok'); }
+  else if (!modalEliminar.classList.contains('oculto')) { avisoEliminar.textContent = texto; }
   else alert(texto);
 }
 
@@ -1010,6 +1011,7 @@ function fijarModo(modo, conservarAviso) {
 
 function sincronizarRolUI() {
   document.body.classList.toggle('es-staff', esPrivilegiado());
+  document.body.classList.toggle('es-admin', miRol === 'admin');
   document.body.classList.toggle('es-registrado', !cuentaConectada.classList.contains('oculto'));
   const nombre = miNick || '…';
   const inicial = nombre.charAt(0).toUpperCase();
@@ -1027,6 +1029,8 @@ function cerrarDrawers() { document.body.classList.remove('drawer-salas', 'drawe
 
 function mostrarChat() {
   document.body.dataset.vista = 'chat';
+  // Quien entra al chat (y no es del equipo) aparece directamente en La Plaza
+  if (!esPrivilegiado() && !salasUnidas.has('plaza')) socket.emit('unirseSala', { salaId: 'plaza' });
   avisarAcceso('');
   sincronizarRolUI();
   chat.scrollTop = chat.scrollHeight;
@@ -1106,11 +1110,13 @@ document.getElementById('btnPanelMod').addEventListener('click', () => {
   modalMod.classList.remove('oculto');
   socket.emit('pedirUsuarios');
   socket.emit('pedirEquipo');
+  socket.emit('pedirImagenes');
   clearInterval(intervaloEquipo);
   // Mientras el panel está abierto, la lista se refresca sola cada pocos segundos
   intervaloEquipo = setInterval(() => {
     if (modalMod.classList.contains('oculto')) { clearInterval(intervaloEquipo); return; }
     socket.emit('pedirEquipo');
+    socket.emit('pedirImagenes');
   }, 8000);
 });
 
@@ -1235,4 +1241,84 @@ document.getElementById('btnGuardarCorreo').addEventListener('click', (e) => {
   boton.disabled = true;
   setTimeout(() => { boton.disabled = false; }, 4000);
   socket.emit('guardarCorreo', { email, contrasena });
+});
+
+
+// ================== ELIMINAR CUENTA ==================
+const modalEliminar = document.getElementById('modalEliminar');
+const avisoEliminar = document.getElementById('avisoEliminar');
+document.getElementById('btnEliminarCuenta').addEventListener('click', () => {
+  document.getElementById('eliminarClaveInput').value = '';
+  document.getElementById('eliminarConfirma').checked = false;
+  avisoEliminar.textContent = '';
+  modalEliminar.classList.remove('oculto');
+});
+document.getElementById('btnCerrarEliminar').addEventListener('click', () => modalEliminar.classList.add('oculto'));
+modalEliminar.addEventListener('click', (e) => { if (e.target === modalEliminar) modalEliminar.classList.add('oculto'); });
+document.getElementById('btnConfirmarEliminar').addEventListener('click', (e) => {
+  const clave = document.getElementById('eliminarClaveInput').value;
+  if (!clave) { avisoEliminar.textContent = 'Escribe tu contraseña.'; return; }
+  if (!document.getElementById('eliminarConfirma').checked) { avisoEliminar.textContent = 'Marca la casilla para confirmar.'; return; }
+  avisoEliminar.textContent = '';
+  const boton = e.currentTarget;
+  boton.disabled = true;
+  setTimeout(() => { boton.disabled = false; }, 3000);
+  socket.emit('eliminarCuenta', { contrasena: clave });
+});
+socket.on('cuentaEliminada', () => {
+  modalEliminar.classList.add('oculto');
+  document.getElementById('eliminarClaveInput').value = '';
+  // el servidor ya cerró la sesión: la pantalla de acceso está visible
+  avisarAcceso('Tu cuenta y tus datos se han eliminado.', true);
+});
+
+// ================== REVISIÓN DE IMÁGENES (STAFF) ==================
+const listaImagenes = document.getElementById('listaImagenes');
+const modalImagen = document.getElementById('modalImagen');
+let imagenActual = null;
+function tiempoRelativo(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return 'ahora mismo';
+  if (m < 60) return `hace ${m} min`;
+  return `hace ${Math.floor(m / 60)} h`;
+}
+socket.on('listaImagenes', (lista) => {
+  listaImagenes.innerHTML = lista.length
+    ? lista.map(i => `<div class="fila-equipo"><span class="equipo-nombre">${escapar(i.nick)} <small>· ${escapar(i.sala)}</small></span>` +
+        `<span class="equipo-detalle">${tiempoRelativo(i.fecha)} <button type="button" class="btn-ver-imagen" data-id="${escapar(i.id)}">Ver</button></span></div>`).join('')
+    : '<p class="ayuda">No hay imágenes guardadas ahora mismo.</p>';
+});
+listaImagenes.addEventListener('click', (e) => {
+  const b = e.target.closest('.btn-ver-imagen');
+  if (b) socket.emit('verImagen', { id: b.dataset.id });
+});
+socket.on('imagenModeracion', (d) => {
+  imagenActual = d;
+  document.getElementById('visorImg').src = d.dataUrl;
+  document.getElementById('visorInfo').textContent = `Enviada por ${d.nick} en "${d.sala}" ${tiempoRelativo(d.fecha)}.`;
+  modalImagen.classList.remove('oculto');
+});
+document.getElementById('btnCerrarImagen').addEventListener('click', () => modalImagen.classList.add('oculto'));
+modalImagen.addEventListener('click', (e) => { if (e.target === modalImagen) modalImagen.classList.add('oculto'); });
+document.getElementById('btnRetirarImagen').addEventListener('click', () => {
+  if (!imagenActual) return;
+  socket.emit('eliminarMensaje', { salaId: imagenActual.salaId, mensajeId: imagenActual.id });
+  mostrarToast('Imagen retirada del chat. La copia sigue guardada hasta que caduque.');
+  modalImagen.classList.add('oculto');
+});
+document.getElementById('btnBloquearAutor').addEventListener('click', () => {
+  if (!imagenActual) return;
+  if (confirm(`¿Bloquear la IP de ${imagenActual.nick}? Solo funciona si sigue conectado.`)) socket.emit('banearIP', { nickObjetivo: imagenActual.nick });
+});
+
+// ================== DIAGNÓSTICO DE IP (ADMIN) ==================
+document.getElementById('btnDiagIP').addEventListener('click', () => socket.emit('diagnosticoIP'));
+socket.on('diagnosticoIP', (d) => {
+  const salida = document.getElementById('salidaDiagIP');
+  salida.textContent =
+    `IP que usa el chat:    ${d.detectada || '—'}\n` +
+    `CF-Connecting-IP:      ${d.cf || '—'}\n` +
+    `X-Forwarded-For:       ${d.xff || '—'}\n` +
+    `Conexión directa:      ${d.directa || '—'}`;
+  salida.classList.remove('oculto');
 });

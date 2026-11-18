@@ -64,6 +64,7 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'CAMBIA-ESTA-CLAVE';
 
 // Copia de las imagenes de las salas publicas para moderacion (24h) - no se usa para privados
 const imagenesModeracion = new Map(); // id -> { dataUrl, nick, salaId, fecha }
+const MAX_IMAGENES_RETENIDAS = 40;    // tope para no llenar la memoria del servidor gratuito
 
 function esImagenValida(dataUrl) {
   return typeof dataUrl === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|svg\+xml);base64,/.test(dataUrl) && dataUrl.length <= MAX_TAMANO_IMAGEN;
@@ -135,6 +136,12 @@ salas.set('staff', {
   id: 'staff', nombre: '👑 Sala Staff', creador: 'sistema',
   usuarios: new Set(), vacioDesde: null, permanente: true, oculta: true
 });
+
+// La Plaza: sala fija y pública, punto de encuentro de todo el mundo. No se puede cerrar nunca.
+salas.set('plaza', {
+  id: 'plaza', nombre: 'La Plaza', creador: 'sistema',
+  usuarios: new Set(), vacioDesde: null, permanente: true, fija: true
+});
 let adminSocketId = null;
 const moderadores = new Set();        // socketId
 
@@ -144,7 +151,7 @@ function esModOAdmin(socketId) {
 
 function listaSalas() {
   return Array.from(salas.values()).map(s => ({
-    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente
+    id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, fija: !!s.fija
   }));
 }
 
@@ -154,8 +161,8 @@ function listaSalasPara(socketId) {
   return Array.from(salas.values())
     .filter(s => !s.oculta || privilegiado)
     .map(s => ({
-      id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente,
-      puedeCerrar: !s.oculta && (privilegiado || s.creador === miNickActual)
+      id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, fija: !!s.fija,
+      puedeCerrar: !s.oculta && !s.fija && (privilegiado || s.creador === miNickActual)
     }));
 }
 
@@ -422,7 +429,7 @@ io.on('connection', (socket) => {
 
   // ---- Registro de cuenta nueva ----
   // ---- Cerrar sesion (vuelve a ser usuario anonimo con nick aleatorio) ----
-  socket.on('cerrarSesion', () => {
+  const hacerCerrarSesion = () => {
     const nickAnterior = usuariosConectados.get(socket.id);
     if (adminSocketId === socket.id) adminSocketId = null;
     moderadores.delete(socket.id);
@@ -437,7 +444,8 @@ io.on('connection', (socket) => {
     io.emit('sistema', { texto: `${nickAnterior} ha cerrado sesion` });
     io.emit('totalConectados', usuariosConectados.size);
     emitirSalasATodos();
-  });
+  };
+  socket.on('cerrarSesion', hacerCerrarSesion);
 
   socket.on('registrar', async ({ usuario, contrasena, mayorDeEdad, email }) => {
     if (!usuariosCol) { socket.emit('error_app', 'El registro no esta disponible ahora mismo.'); return; }
@@ -514,6 +522,25 @@ io.on('connection', (socket) => {
     io.emit('sistema', { texto: `${doc.usuario} ha iniciado sesion` });
   });
 
+  // ---- Eliminar la propia cuenta (hay que repetir la contraseña) ----
+  socket.on('eliminarCuenta', async ({ contrasena }) => {
+    if (!usuariosCol || !socket.data.registrado || !socket.data.usuario) { socket.emit('error_app', 'Inicia sesión con tu cuenta para poder eliminarla.'); return; }
+    const uClave = socket.data.usuario.toLowerCase();
+    if (!recuperacion.permitir('del-cta:' + uClave, 5, 60 * 60 * 1000)) { socket.emit('error_app', 'Demasiados intentos. Inténtalo de nuevo más tarde.'); return; }
+    const doc = await usuariosCol.findOne({ usuarioClave: uClave });
+    if (!doc || !(await bcrypt.compare(String(contrasena || ''), doc.hash))) { socket.emit('error_app', 'La contraseña no es correcta.'); return; }
+    if (doc.rol === 'admin') { socket.emit('error_app', 'La cuenta de administrador no se puede eliminar desde aquí.'); return; }
+
+    await usuariosCol.deleteOne({ usuarioClave: uClave });
+    if (tokensCuentaCol) await tokensCuentaCol.deleteMany({ usuarioClave: uClave });
+    if (notasStaffCol) await notasStaffCol.deleteMany({ nick: doc.usuario });
+    if (estadisticasCol) estadisticasCol.updateOne({ _id: 'global' }, { $unset: { [`porUsuario.${doc.usuario}`]: '' } }).catch(() => {});
+    if (doc.email && doc.emailVerificado) recuperacion.avisarEliminacion(doc.email, doc.usuario);
+
+    hacerCerrarSesion();
+    socket.emit('cuentaEliminada');
+  });
+
   // ---- Añadir o cambiar el correo de recuperación (hay que repetir la contraseña) ----
   socket.on('guardarCorreo', async ({ email, contrasena }) => {
     if (!usuariosCol || !socket.data.registrado || !socket.data.usuario) { socket.emit('error_app', 'Inicia sesión con tu cuenta para añadir un correo.'); return; }
@@ -547,7 +574,7 @@ io.on('connection', (socket) => {
   socket.on('crearSala', ({ nombre }) => {
     const nombreLimpio = String(nombre || '').trim().slice(0, 30);
     if (!nombreLimpio) return;
-    const salasVisibles = Array.from(salas.values()).filter(s => !s.oculta).length;
+    const salasVisibles = Array.from(salas.values()).filter(s => !s.oculta && !s.fija).length;
     if (salasVisibles >= MAX_SALAS) { socket.emit('error_app', 'Ya existen 10 salas, el maximo permitido.'); return; }
     const id = 'sala_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const permanente = esModOAdmin(socket.id);
@@ -562,7 +589,8 @@ io.on('connection', (socket) => {
     if (!sala) return;
     const yaUnido = socket.data.salasUnidas.has(salaId);
     const privilegiado = esModOAdmin(socket.id);
-    if (!yaUnido && !privilegiado && socket.data.salasUnidas.size >= MAX_SALAS_POR_USUARIO) {
+    const enSalasPropias = Array.from(socket.data.salasUnidas).filter(id => !(salas.get(id) && salas.get(id).fija)).length;
+    if (!yaUnido && !privilegiado && !sala.fija && enSalasPropias >= MAX_SALAS_POR_USUARIO) {
       socket.emit('error_app', `Solo puedes estar en ${MAX_SALAS_POR_USUARIO} salas a la vez. Sal de alguna para entrar en esta.`);
       return;
     }
@@ -628,6 +656,7 @@ io.on('connection', (socket) => {
       const id = 'img_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
       imagenesModeracion.set(id, { dataUrl: imagenDataUrl, nick, salaId, fecha: Date.now() });
       setTimeout(() => imagenesModeracion.delete(id), 24 * 60 * 60 * 1000);
+      while (imagenesModeracion.size > MAX_IMAGENES_RETENIDAS) imagenesModeracion.delete(imagenesModeracion.keys().next().value);
 
       const msg = { salaId, id, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'imagen', imagenDataUrl, imagenNombre: String(imagenNombre || 'imagen'), hora };
       io.to(salaId).emit('mensajeSala', msg);
@@ -934,6 +963,7 @@ io.on('connection', (socket) => {
     const sala = salas.get(salaId);
     if (!sala) return;
     if (sala.oculta) return;
+    if (sala.fija) { socket.emit('error_app', 'La Plaza es la sala principal y no se puede cerrar.'); return; }
     const esCreador = sala.creador === usuariosConectados.get(socket.id);
     const esPriv = esModOAdmin(socket.id);
 
@@ -957,6 +987,29 @@ io.on('connection', (socket) => {
   socket.on('pedirUsuariosDeSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (sala) socket.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
+  });
+
+  // ---- Revisión de imágenes retenidas (solo staff) ----
+  const nombreDeSala = (id) => (salas.get(id) ? salas.get(id).nombre : 'sala cerrada');
+  socket.on('pedirImagenes', () => {
+    if (!esModOAdmin(socket.id)) return;
+    const lista = Array.from(imagenesModeracion.entries())
+      .map(([id, im]) => ({ id, nick: im.nick, sala: nombreDeSala(im.salaId), salaId: im.salaId, fecha: im.fecha }))
+      .sort((a, b) => b.fecha - a.fecha);
+    socket.emit('listaImagenes', lista);
+  });
+  socket.on('verImagen', ({ id }) => {
+    if (!esModOAdmin(socket.id)) return;
+    const im = imagenesModeracion.get(String(id));
+    if (!im) { socket.emit('error_app', 'Esa imagen ya no está guardada.'); return; }
+    socket.emit('imagenModeracion', { id: String(id), nick: im.nick, sala: nombreDeSala(im.salaId), salaId: im.salaId, fecha: im.fecha, dataUrl: im.dataUrl });
+  });
+
+  // ---- Diagnóstico de cómo ve el servidor la conexión del admin (para revisar el bloqueo por IP) ----
+  socket.on('diagnosticoIP', () => {
+    if (socket.id !== adminSocketId) return;
+    const h = socket.handshake.headers;
+    socket.emit('diagnosticoIP', { detectada: obtenerIP(socket), cf: h['cf-connecting-ip'] || null, xff: h['x-forwarded-for'] || null, directa: socket.handshake.address || null });
   });
 
   socket.on('pedirEquipo', async () => {
