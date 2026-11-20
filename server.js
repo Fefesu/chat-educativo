@@ -29,8 +29,15 @@ app.use((req, res, next) => {
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.json());
 
+// La IP real llega en CF-Connecting-IP (Cloudflare la escribe y no se puede falsificar a través de él).
+// Si no viniera, se usa X-Forwarded-For como hasta ahora.
+function ipDeCabeceras(headers, directa) {
+  const cf = String(headers['cf-connecting-ip'] || '').trim();
+  if (cf) return cf;
+  return String(headers['x-forwarded-for'] || directa || '').split(',')[0].trim();
+}
 function obtenerIPDesdeRequest(req) {
-  return (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '').split(',')[0].trim();
+  return ipDeCabeceras(req.headers, req.socket.remoteAddress);
 }
 
 app.post('/api/apelar-baneo', async (req, res) => {
@@ -65,6 +72,17 @@ const ADMIN_KEY = process.env.ADMIN_KEY || 'CAMBIA-ESTA-CLAVE';
 // Copia de las imagenes de las salas publicas para moderacion (24h) - no se usa para privados
 const imagenesModeracion = new Map(); // id -> { dataUrl, nick, salaId, fecha }
 const MAX_IMAGENES_RETENIDAS = 40;    // tope para no llenar la memoria del servidor gratuito
+
+// ---- Mensajes recientes de cada sala (solo en memoria, hasta 100) ----
+// Sirven para comprobar que una respuesta o una reacción apuntan a un mensaje real (nadie puede inventar citas).
+const MAX_RECIENTES_POR_SALA = 100;
+const REACCIONES_PERMITIDAS = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+function recordarMensaje(sala, msg) {
+  if (!sala.recientes) sala.recientes = [];
+  sala.recientes.push({ id: msg.id, nick: msg.nick, tipo: msg.tipo, texto: msg.tipo === 'imagen' ? '' : msg.texto, reacciones: new Map() });
+  if (sala.recientes.length > MAX_RECIENTES_POR_SALA) sala.recientes.shift();
+}
+const resumenCita = (m) => (m.tipo === 'imagen' ? '📷 Imagen' : String(m.texto).slice(0, 90));
 
 function esImagenValida(dataUrl) {
   return typeof dataUrl === 'string' && /^data:image\/(png|jpe?g|gif|webp|bmp|svg\+xml);base64,/.test(dataUrl) && dataUrl.length <= MAX_TAMANO_IMAGEN;
@@ -121,6 +139,7 @@ async function conectarDB() {
   notasStaffCol = cliente.db('chat_educativo').collection('notasStaff');
   estadisticasCol = cliente.db('chat_educativo').collection('estadisticas');
   tokensCuentaCol = cliente.db('chat_educativo').collection('tokensCuenta');
+  historialBloqueosCol = cliente.db('chat_educativo').collection('historialBloqueos');
   await tokensCuentaCol.createIndex({ expira: 1 }, { expireAfterSeconds: 0 }); // Mongo borra los enlaces caducados
   await tokensCuentaCol.createIndex({ hash: 1 });
   await cargarBaneados();
@@ -331,7 +350,13 @@ function estaEnFlood(socketId) {
 
 // ---- IPs baneadas (persistentes si hay base de datos) ----
 let baneadosCol = null;
-const ipsBaneadasCache = new Map(); // ip -> fecha de expiracion en ms, o null si es permanente
+const ipsBaneadasCache = new Map();     // ip -> { expira (ms) | null, motivo, nivel }
+const cuentasBaneadasCache = new Map(); // usuarioClave -> { expira, motivo, nivel }
+let historialBloqueosCol = null;        // cuántas veces se ha bloqueado a una IP / cuenta (para escalar)
+
+const DURACIONES_BLOQUEO_HORAS = [24, 72, 168]; // 1.º bloqueo: 24 h · 2.º: 72 h · 3.º y siguientes: 7 días
+const MOTIVOS_BLOQUEO = ['Falta de respeto', 'Falta de educación', 'Insultos', 'Imágenes no permitidas', 'Spam o publicidad', 'Acoso a otras personas', 'Otro motivo'];
+const MOTIVO_BOT = 'Mensajes repetidos que incumplen las normas (detección automática)';
 
 async function cargarBaneados() {
   if (!baneadosCol) return;
@@ -339,22 +364,49 @@ async function cargarBaneados() {
   const ahora = Date.now();
   baneados.forEach(b => {
     const expira = b.expira ? new Date(b.expira).getTime() : null;
-    if (!expira || expira > ahora) ipsBaneadasCache.set(b.ip, expira);
+    if (expira && expira <= ahora) return;
+    const d = { expira, motivo: b.motivo || null, nivel: b.nivel || 0 };
+    ipsBaneadasCache.set(b.ip, d);
+    if (b.usuarioClave) cuentasBaneadasCache.set(b.usuarioClave, d);
   });
 }
 
-function estaBaneada(ip) {
-  if (!ipsBaneadasCache.has(ip)) return false;
-  const expira = ipsBaneadasCache.get(ip);
-  if (expira && Date.now() > expira) {
-    ipsBaneadasCache.delete(ip);
-    return false;
-  }
-  return true;
+function bloqueoActivo(cache, clave) {
+  const d = cache.get(clave);
+  if (!d) return null;
+  if (d.expira && Date.now() > d.expira) { cache.delete(clave); return null; }
+  return d;
+}
+function estaBaneada(ip) { return !!bloqueoActivo(ipsBaneadasCache, ip); }
+
+// Lo que ve la persona bloqueada (solo ella): motivo, hasta cuándo y qué nivel de bloqueo es
+function avisoBloqueo(d) {
+  return { adminOnline: !!adminSocketId, modsOnline: moderadores.size > 0, motivo: d.motivo || 'Uso inadecuado del chat', hasta: d.expira || null, nivel: d.nivel || 0 };
 }
 
+// Nivel del próximo bloqueo: 24 h la primera vez, 72 h la segunda y 7 días de la tercera en adelante.
+// Con cuenta registrada cuenta el historial de la cuenta; como invitado, el de la IP.
+async function nivelSiguiente(ip, uClave) {
+  let previos = 0;
+  if (historialBloqueosCol) {
+    const h = await historialBloqueosCol.findOne({ _id: uClave ? 'cta:' + uClave : 'ip:' + ip });
+    previos = (h && h.total) || 0;
+  }
+  const nivel = Math.min(previos + 1, DURACIONES_BLOQUEO_HORAS.length);
+  return { nivel, horas: DURACIONES_BLOQUEO_HORAS[nivel - 1], previos };
+}
+async function sumarBloqueo(ip, uClave, delta) {
+  if (!historialBloqueosCol) return;
+  for (const id of [ 'ip:' + ip, uClave ? 'cta:' + uClave : null ].filter(Boolean)) {
+    const h = await historialBloqueosCol.findOne({ _id: id });
+    const total = Math.max(0, ((h && h.total) || 0) + delta);
+    await historialBloqueosCol.updateOne({ _id: id }, { $set: { total, ultimo: new Date() } }, { upsert: true });
+  }
+}
+const textoDuracion = (h) => (h % 24 === 0 ? (h / 24 === 1 ? '24 horas' : `${h / 24} días`) : `${h} horas`);
+
 function obtenerIP(socket) {
-  return (socket.handshake.headers['x-forwarded-for'] || socket.handshake.address || '').split(',')[0].trim();
+  return ipDeCabeceras(socket.handshake.headers, socket.handshake.address);
 }
 
 // ---- Bot moderador (aparece como un nick cualquiera, no revela que es automatico) ----
@@ -377,17 +429,18 @@ async function registrarInfraccionYComprobarEscalado(socket, ip, nick) {
   if (historial.length >= MAX_INFRACCIONES_ANTES_DE_BANEO) {
     infraccionesPorSocket.delete(socket.id);
     const expira = Date.now() + DURACION_BANEO_BOT_MS;
-    ipsBaneadasCache.set(ip, expira);
+    const datosBot = { expira, motivo: MOTIVO_BOT, nivel: 0 };
+    ipsBaneadasCache.set(ip, datosBot);
     if (baneadosCol) {
       try {
         await baneadosCol.updateOne(
           { ip },
-          { $set: { nick, baneadoPor: NICK_BOT + ' (automatico)', fecha: new Date(), expira: new Date(expira) } },
+          { $set: { nick, baneadoPor: NICK_BOT + ' (automatico)', fecha: new Date(), expira: new Date(expira), motivo: MOTIVO_BOT, nivel: 0, mensajesApelacion: [] } },
           { upsert: true }
         );
       } catch (e) { /* silencioso */ }
     }
-    socket.emit('estasBaneado', { adminOnline: !!adminSocketId, modsOnline: moderadores.size > 0 });
+    socket.emit('estasBaneado', avisoBloqueo(datosBot));
     socket.disconnect(true);
     return true;
   }
@@ -407,11 +460,9 @@ function esGritando(texto) {
 
 io.on('connection', (socket) => {
   const ip = obtenerIP(socket);
-  if (estaBaneada(ip)) {
-    socket.emit('estasBaneado', {
-      adminOnline: !!adminSocketId,
-      modsOnline: moderadores.size > 0
-    });
+  const bloqueoIP = bloqueoActivo(ipsBaneadasCache, ip);
+  if (bloqueoIP) {
+    socket.emit('estasBaneado', avisoBloqueo(bloqueoIP));
     socket.disconnect(true);
     return;
   }
@@ -516,6 +567,12 @@ io.on('connection', (socket) => {
     }
 
     intentosLogin.delete(uClave);
+    const bloqueoCuenta = bloqueoActivo(cuentasBaneadasCache, uClave);
+    if (bloqueoCuenta) {
+      socket.emit('estasBaneado', avisoBloqueo(bloqueoCuenta));
+      socket.disconnect(true);
+      return;
+    }
     aplicarSesion(socket, doc.usuario, doc.rol);
     socket.emit('sesionIniciada', { usuario: doc.usuario, rol: doc.rol });
     socket.emit('estadoCorreo', { email: doc.email ? recuperacion.enmascarar(doc.email) : null, verificado: !!doc.emailVerificado });
@@ -613,7 +670,7 @@ io.on('connection', (socket) => {
   });
 
   // ---- Mensaje en una sala ----
-  socket.on('mensajeSala', ({ salaId, texto, imagenDataUrl, imagenNombre }) => {
+  socket.on('mensajeSala', ({ salaId, texto, imagenDataUrl, imagenNombre, respuestaAId }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
     const privilegiado = esModOAdmin(socket.id);
@@ -634,6 +691,9 @@ io.on('connection', (socket) => {
     const nick = usuariosConectados.get(socket.id);
     const ip = obtenerIP(socket);
     const hora = salaId === 'staff' ? fechaHoraMadrid() : horaMadrid();
+    // Si responde a un mensaje, la cita se toma del servidor (no de lo que diga el cliente)
+    const citada = respuestaAId ? (sala.recientes || []).find(m => m.id === String(respuestaAId)) : null;
+    const respuesta = citada ? { id: citada.id, nick: citada.nick, texto: resumenCita(citada) } : null;
 
     if (!imagenDataUrl && esGritando(String(texto || ''))) {
       bloqueadosPorMayus.set(socket.id, Date.now() + BLOQUEO_MAYUS_MS);
@@ -659,6 +719,8 @@ io.on('connection', (socket) => {
       while (imagenesModeracion.size > MAX_IMAGENES_RETENIDAS) imagenesModeracion.delete(imagenesModeracion.keys().next().value);
 
       const msg = { salaId, id, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'imagen', imagenDataUrl, imagenNombre: String(imagenNombre || 'imagen'), hora };
+      if (respuesta) msg.respuesta = respuesta;
+      recordarMensaje(sala, msg);
       io.to(salaId).emit('mensajeSala', msg);
       const espectadores = [adminSocketId, ...moderadores].filter(sid => sid && !sala.usuarios.has(sid));
       espectadores.forEach(sid => io.to(sid).emit('mensajeSala', msg));
@@ -675,6 +737,8 @@ io.on('connection', (socket) => {
 
     const msgId = 'msg_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
     const msg = { salaId, id: msgId, nick, rol: rolDe(socket.id), registrado: !!socket.data.registrado, tipo: 'texto', texto: textoLimpio, hora };
+    if (respuesta) msg.respuesta = respuesta;
+    recordarMensaje(sala, msg);
     if (salaId === 'staff' && notasStaffCol) {
       guardarEnHistorialStaff({ tipo: 'texto', msgId, nick, texto: textoLimpio });
     } else {
@@ -683,6 +747,22 @@ io.on('connection', (socket) => {
     io.to(salaId).emit('mensajeSala', msg);
     const espectadores = [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id));
     espectadores.forEach(id => io.to(id).emit('mensajeSala', msg));
+  });
+
+  socket.on('reaccionar', ({ salaId, mensajeId, emoji }) => {
+    const sala = salas.get(salaId);
+    if (!sala || !REACCIONES_PERMITIDAS.includes(emoji)) return;
+    if (!esModOAdmin(socket.id) && !socket.data.salasUnidas.has(salaId)) return;
+    if (!recuperacion.permitir('reac:' + socket.id, 20, 10 * 1000)) return;
+    const m = (sala.recientes || []).find(x => x.id === String(mensajeId));
+    if (!m) return;
+    const nick = usuariosConectados.get(socket.id);
+    if (m.reacciones.get(nick) === emoji) m.reacciones.delete(nick); else m.reacciones.set(nick, emoji);
+    const reacciones = {};
+    m.reacciones.forEach((e, n) => { (reacciones[e] = reacciones[e] || []).push(n); });
+    const payload = { salaId, mensajeId: m.id, reacciones };
+    io.to(salaId).emit('reacciones', payload);
+    [adminSocketId, ...moderadores].filter(id => id && !sala.usuarios.has(id)).forEach(id => io.to(id).emit('reacciones', payload));
   });
 
   // ---- Reclamar rol de administrador (requiere estar registrado) ----
@@ -792,22 +872,56 @@ io.on('connection', (socket) => {
     socket.emit('avisoOk', `Contrasena de ${doc.usuario} restablecida correctamente.`);
   });
 
-  socket.on('banearIP', async ({ nickObjetivo }) => {
-    if (!esModOAdmin(socket.id)) return;
+  // Localiza a la persona a bloquear y comprueba quién puede bloquear a quién
+  function destinoDeBloqueo(solicitante, nickObjetivo) {
     const destino = Array.from(usuariosConectados.entries()).find(([, n]) => n === nickObjetivo);
-    if (!destino) { socket.emit('error_app', 'Ese usuario no esta conectado ahora mismo.'); return; }
-    const [socketIdDestino] = destino;
-    const socketDestino = io.sockets.sockets.get(socketIdDestino);
-    if (!socketDestino) return;
+    if (!destino) return { error: 'Ese usuario no esta conectado ahora mismo.' };
+    const socketDestino = io.sockets.sockets.get(destino[0]);
+    if (!socketDestino) return { error: 'Ese usuario no esta conectado ahora mismo.' };
+    if (socketDestino.id === solicitante.id) return { error: 'No puedes bloquearte a ti mismo.' };
+    const rolDestino = rolDe(socketDestino.id);
+    if (rolDestino === 'admin') return { error: 'No se puede bloquear al administrador.' };
+    if (rolDestino === 'moderador' && solicitante.id !== adminSocketId) return { error: 'Solo el administrador puede bloquear a un moderador.' };
+    return { socketDestino };
+  }
+
+  // Vista previa: qué nivel de bloqueo le tocaría a esa persona
+  socket.on('previsualizarBloqueo', async ({ nickObjetivo }) => {
+    if (!esModOAdmin(socket.id)) return;
+    const { socketDestino, error } = destinoDeBloqueo(socket, nickObjetivo);
+    if (error) { socket.emit('error_app', error); return; }
+    const uClave = socketDestino.data.registrado && socketDestino.data.usuario ? socketDestino.data.usuario.toLowerCase() : null;
+    const n = await nivelSiguiente(obtenerIP(socketDestino), uClave);
+    socket.emit('previaBloqueo', { nick: nickObjetivo, nivel: n.nivel, duracion: textoDuracion(n.horas), previos: n.previos, registrado: !!uClave });
+  });
+
+  socket.on('banearIP', async ({ nickObjetivo, motivo }) => {
+    if (!esModOAdmin(socket.id)) return;
+    const { socketDestino, error } = destinoDeBloqueo(socket, nickObjetivo);
+    if (error) { socket.emit('error_app', error); return; }
     const ip = obtenerIP(socketDestino);
-    ipsBaneadasCache.set(ip, null);
+    const uClave = socketDestino.data.registrado && socketDestino.data.usuario ? socketDestino.data.usuario.toLowerCase() : null;
+    const motivoFinal = MOTIVOS_BLOQUEO.includes(motivo) ? motivo : 'Otro motivo';
+    const { nivel, horas } = await nivelSiguiente(ip, uClave);
+    const expira = Date.now() + horas * 60 * 60 * 1000;
+    const datos = { expira, motivo: motivoFinal, nivel };
     const baneadoPor = usuariosConectados.get(socket.id);
+
+    ipsBaneadasCache.set(ip, datos);
+    if (uClave) cuentasBaneadasCache.set(uClave, datos);
     if (baneadosCol) {
-      try { await baneadosCol.insertOne({ ip, nick: nickObjetivo, baneadoPor, fecha: new Date(), expira: null }); } catch (e) { /* ya existia */ }
+      await baneadosCol.updateOne({ ip }, { $set: {
+        nick: nickObjetivo, usuarioClave: uClave, motivo: motivoFinal, nivel, horas, baneadoPor,
+        fecha: new Date(), expira: new Date(expira), mensajesApelacion: []
+      } }, { upsert: true });
     }
-    socketDestino.emit('error_app', 'Has sido bloqueado de este chat por un administrador.');
+    await sumarBloqueo(ip, uClave, +1);
+
+    // El aviso con el motivo lo ve SOLO la persona bloqueada; al resto del chat no se le anuncia nada.
+    socketDestino.emit('estasBaneado', avisoBloqueo(datos));
     socketDestino.disconnect(true);
-    io.emit('sistema', { texto: `${nickObjetivo} ha sido bloqueado del chat` });
+    [adminSocketId, ...moderadores].filter(Boolean).forEach(id =>
+      io.to(id).emit('sistema', { texto: `🚫 ${nickObjetivo} bloqueado ${textoDuracion(horas)} (nivel ${nivel}) · ${motivoFinal} · por ${baneadoPor}` }));
   });
 
   // ---- Listado y desbaneo de IPs (admin o moderador) ----
@@ -844,28 +958,35 @@ io.on('connection', (socket) => {
     });
   });
 
+  async function listaBaneadosPanel() {
+    if (!baneadosCol) return [];
+    const ahora = Date.now();
+    const lista = await baneadosCol.find({}).sort({ fecha: -1 }).toArray();
+    return lista
+      .filter(b => !b.expira || new Date(b.expira).getTime() > ahora)
+      .map(b => ({
+        ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
+        fecha: new Date(b.fecha).toLocaleString('es-ES', { timeZone: ZONA_HORARIA }),
+        motivo: b.motivo || null, nivel: b.nivel || 0, cuenta: !!b.usuarioClave,
+        hasta: b.expira ? new Date(b.expira).toLocaleString('es-ES', { timeZone: ZONA_HORARIA }) : null,
+        mensajesApelacion: (b.mensajesApelacion || []).map(m => ({ texto: m.texto, fecha: new Date(m.fecha).toLocaleString('es-ES', { timeZone: ZONA_HORARIA }) }))
+      }));
+  }
   socket.on('pedirBaneados', async () => {
     if (!esModOAdmin(socket.id) || !baneadosCol) return;
-    const lista = await baneadosCol.find({}).sort({ fecha: -1 }).toArray();
-    socket.emit('listaBaneados', lista.map(b => ({
-      ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
-      fecha: new Date(b.fecha).toLocaleString('es-ES'),
-      mensajesApelacion: (b.mensajesApelacion || []).map(m => ({
-        texto: m.texto, fecha: new Date(m.fecha).toLocaleString('es-ES')
-      }))
-    })));
+    socket.emit('listaBaneados', await listaBaneadosPanel());
   });
 
   socket.on('desbanearIP', async ({ ip }) => {
     if (!esModOAdmin(socket.id)) return;
+    const doc = baneadosCol ? await baneadosCol.findOne({ ip }) : null;
     ipsBaneadasCache.delete(ip);
+    if (doc && doc.usuarioClave) cuentasBaneadasCache.delete(doc.usuarioClave);
+    // Si se retira un bloqueo que seguía activo (por error), no cuenta como reincidencia
+    if (doc && doc.nivel > 0 && doc.expira && new Date(doc.expira).getTime() > Date.now()) await sumarBloqueo(ip, doc.usuarioClave, -1);
     if (baneadosCol) await baneadosCol.deleteOne({ ip });
     socket.emit('avisoOk', 'IP desbloqueada correctamente.');
-    const lista = baneadosCol ? await baneadosCol.find({}).sort({ fecha: -1 }).toArray() : [];
-    socket.emit('listaBaneados', lista.map(b => ({
-      ip: b.ip, nick: b.nick, baneadoPor: b.baneadoPor || '—',
-      fecha: new Date(b.fecha).toLocaleString('es-ES')
-    })));
+    socket.emit('listaBaneados', await listaBaneadosPanel());
   });
 
   // ---- Chats privados (100% anonimos, ni siquiera admin/mod los ven) ----
@@ -939,6 +1060,7 @@ io.on('connection', (socket) => {
   socket.on('eliminarMensaje', ({ salaId, mensajeId }) => {
     if (!esModOAdmin(socket.id)) return;
     if (!salaId || !mensajeId) return;
+    { const sl = salas.get(salaId); if (sl && sl.recientes) sl.recientes = sl.recientes.filter(m => m.id !== String(mensajeId)); }
     if (salaId === 'staff' && notasStaffCol) notasStaffCol.deleteOne({ msgId: String(mensajeId) }).catch(() => {});
     io.to(salaId).emit('mensajeEliminado', { salaId, mensajeId });
     const sala = salas.get(salaId);
@@ -1058,6 +1180,17 @@ setInterval(() => {
   });
 }, 60 * 1000);
 
+async function limpiarBloqueosCaducados() {
+  if (!baneadosCol) return;
+  try {
+    const ahora = Date.now();
+    const lista = await baneadosCol.find({}).toArray();
+    for (const b of lista) if (b.expira && new Date(b.expira).getTime() <= ahora) await baneadosCol.deleteOne({ ip: b.ip });
+  } catch (e) { /* silencioso */ }
+}
+setInterval(limpiarBloqueosCaducados, 60 * 60 * 1000).unref();
+
 conectarDB().finally(() => {
+  limpiarBloqueosCaducados();
   server.listen(PUERTO, () => console.log(`Chat educativo escuchando en el puerto ${PUERTO}`));
 });

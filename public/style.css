@@ -917,3 +917,78 @@ body.es-admin .solo-admin { display: block; }
 .btn-ver-imagen { margin-left: 8px; }
 .diag { margin: 10px 0 0; padding: 12px; background: var(--fondo); border: 1px solid var(--borde); border-radius: 10px; font-size: 12px; line-height: 1.6; overflow-x: auto; white-space: pre; }
 #listaImagenes { max-height: 220px; overflow-y: auto; }
+
+/* ================== RESPONDER, REACCIONAR Y BLOQUEOS ================== */
+.campo select {
+  width: 100%; padding: 13px 14px;
+  border-radius: 12px; border: 2px solid var(--borde);
+  background: var(--fondo); color: var(--tinta);
+  font-size: 16px; outline: none; cursor: pointer;
+}
+.campo select:focus { border-color: var(--pri); box-shadow: 0 0 0 4px rgba(109, 74, 255, 0.15); }
+.motivo-bloqueo { background: var(--pri-claro); border-radius: 12px; padding: 12px 14px; color: var(--tinta) !important; text-align: left; }
+
+/* Barra de acciones de cada mensaje (responder, reaccionar, reportar, eliminar) */
+.acciones-msg {
+  position: absolute; top: -14px; right: 10px;
+  display: flex; align-items: center; gap: 2px;
+  background: var(--panel); border: 1px solid var(--borde);
+  border-radius: 999px; padding: 2px 4px;
+  box-shadow: 0 4px 12px rgba(80, 60, 170, 0.18);
+  opacity: 0; pointer-events: none; transition: opacity 0.12s;
+  z-index: 5;
+}
+.mensaje:hover .acciones-msg, .mensaje.activo .acciones-msg, .mensaje:focus-within .acciones-msg { opacity: 1; pointer-events: auto; }
+.btn-accion { border: 0; background: transparent; font-size: 15px; line-height: 1; padding: 5px 7px; border-radius: 999px; cursor: pointer; color: var(--tinta); }
+.btn-accion:hover { background: var(--pri-claro); }
+.acciones-msg .btn-reportar, .acciones-msg .btn-eliminar-msg { position: static; opacity: 0.8; padding: 5px 7px; font-size: 13px; }
+.acciones-msg .btn-reportar:hover, .acciones-msg .btn-eliminar-msg:hover { opacity: 1; }
+
+/* Cita del mensaje al que se responde */
+.cita {
+  display: flex; flex-direction: column; gap: 1px;
+  margin: 0 0 6px; padding: 5px 9px;
+  border-left: 3px solid var(--pri); background: var(--pri-claro);
+  border-radius: 8px; font-size: 12px; cursor: pointer; max-width: 100%;
+}
+.cita span { color: var(--tinta-suave); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mensaje.propio .cita { background: rgba(255, 255, 255, 0.2); border-left-color: #fff; }
+.mensaje.propio .cita b, .mensaje.propio .cita span { color: #fff !important; }
+.mensaje.resaltado { animation: destello 1.4s ease-out; }
+@keyframes destello { 0% { box-shadow: 0 0 0 4px var(--acento); } 100% { box-shadow: 0 0 0 0 transparent; } }
+
+/* Reacciones */
+.reacciones { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+.chip-reaccion {
+  border: 1px solid var(--borde); background: var(--panel); color: var(--tinta);
+  border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 700; cursor: pointer;
+}
+.chip-reaccion.mia { border-color: var(--pri); background: var(--pri-claro); color: var(--pri); }
+.mensaje.propio .chip-reaccion { background: rgba(255, 255, 255, 0.2); border-color: rgba(255, 255, 255, 0.5); color: #fff; }
+.mensaje.propio .chip-reaccion.mia { background: #fff; color: var(--pri); }
+.selector-reaccion {
+  position: fixed; z-index: 110;
+  display: flex; gap: 2px;
+  background: var(--panel); border: 1px solid var(--borde);
+  border-radius: 999px; padding: 4px 6px; box-shadow: var(--sombra);
+}
+.emoji-reaccion { border: 0; background: transparent; font-size: 24px; line-height: 1; padding: 6px 7px; border-radius: 999px; cursor: pointer; transition: transform 0.1s; }
+.emoji-reaccion:hover { transform: scale(1.25); background: var(--pri-claro); }
+
+/* Barra "Respondiendo a…" encima del cuadro de escribir */
+.barra-respuesta {
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px; background: var(--pri-claro);
+  border-top: 1px solid var(--borde); font-size: 13px; font-weight: 600;
+}
+.barra-resp-txt { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.barra-respuesta button { border: 0; background: transparent; font-size: 16px; cursor: pointer; color: var(--tinta-suave); padding: 4px 8px; }
+
+/* La barra de acciones queda por encima de la burbuja y no tapa el nombre */
+.acciones-msg { top: -30px; }
+.chat { padding-top: 32px; }
+@media (max-width: 860px) { .chat { padding-top: 30px; } }
+
+/* Las ventanas que se abren desde el panel de moderación deben quedar por encima de él */
+#modalBloqueo, #modalImagen { z-index: 105; }
+#bloqueoPrevia { margin-bottom: 14px; font-weight: 700; color: var(--tinta); }

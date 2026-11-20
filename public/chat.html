@@ -135,6 +135,10 @@
         <p class="escribiendo-aviso" id="avisoEscribiendo"></p>
         <div class="compositor-envoltorio">
           <div id="panelEmoji" class="panel-emoji oculto"></div>
+          <div id="barraRespuesta" class="barra-respuesta oculto">
+            <span class="barra-resp-txt" id="textoRespuesta"></span>
+            <button type="button" id="btnCancelarRespuesta" aria-label="Cancelar respuesta">✕</button>
+          </div>
           <form class="compositor" id="formulario">
             <button type="button" id="btnEmoji" class="btn-camara" title="Insertar emoji">😊</button>
             <button type="button" id="btnAdjuntar" class="btn-camara" title="Subir foto o GIF desde tu dispositivo">📷</button>
@@ -178,6 +182,34 @@
         <p id="avisoCorreo" class="aviso-acceso" role="alert"></p>
         <button type="button" id="btnGuardarCorreo" class="btn btn-primario btn-ancho">Guardar y enviar confirmación</button>
         <p class="ayuda">Te enviaremos un enlace para confirmar que el correo es tuyo. Hasta que lo confirmes, no podrá usarse para recuperar la contraseña.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ MODAL: BLOQUEAR USUARIO (staff) ============ -->
+  <div id="modalBloqueo" class="modal-fondo oculto">
+    <div class="modal-caja modal-estrecho">
+      <div class="modal-cab">
+        <h2>🚫 Bloquear usuario</h2>
+        <button type="button" id="btnCerrarBloqueo" class="modal-cerrar">✕</button>
+      </div>
+      <div class="modal-cuerpo">
+        <p class="ayuda" id="bloqueoResumen"></p>
+        <div class="campo">
+          <label for="bloqueoMotivo">Motivo (lo verá solo esa persona)</label>
+          <select id="bloqueoMotivo">
+            <option>Falta de respeto</option>
+            <option>Falta de educación</option>
+            <option>Insultos</option>
+            <option>Imágenes no permitidas</option>
+            <option>Spam o publicidad</option>
+            <option>Acoso a otras personas</option>
+            <option>Otro motivo</option>
+          </select>
+        </div>
+        <p id="bloqueoPrevia" class="ayuda"></p>
+        <button type="button" id="btnConfirmarBloqueo" class="btn btn-peligro btn-ancho">Bloquear</button>
+        <p class="ayuda">Los bloqueos son temporales y suben con la reincidencia: 24 horas, luego 72 horas y después 7 días. Al resto del chat no se le avisa.</p>
       </div>
     </div>
   </div>
@@ -319,9 +351,9 @@
           <ul class="landing-lista">
             <li><strong>Si te registras:</strong> guardamos tu nombre de usuario, tu contraseña cifrada y tu confirmación de mayoría de edad.</li>
             <li><strong>Correo electrónico:</strong> solo para confirmar tu cuenta y poder recuperar tu contraseña. Nadie más lo ve, no se usa para publicidad y no se comparte. Para enviar esos mensajes usamos un servicio de envío de correo (Brevo), que recibe tu dirección únicamente en el momento del envío.</li>
-            <li><strong>Mensajes:</strong> no se guardan de forma permanente. Las imágenes se retiran de la vista a los 3 minutos, con copia de moderación durante 24h.</li>
+            <li><strong>Mensajes:</strong> no se guardan de forma permanente. Los últimos mensajes de cada sala se conservan solo en la memoria del servidor mientras la sala está activa (para poder responder y reaccionar). Las imágenes se retiran de la vista a los 3 minutos, con copia de moderación durante 24h.</li>
             <li><strong>Chats privados:</strong> 100% anónimos, se borran al cerrarse.</li>
-            <li><strong>IP:</strong> solo se registra si eres bloqueado por incumplir las normas.</li>
+            <li><strong>IP:</strong> solo se registra si eres bloqueado por incumplir las normas. Los bloqueos son temporales (24 horas, 72 horas o 7 días según reincidencia) y se te informa del motivo.</li>
             <li><strong>Estadísticas:</strong> guardamos contadores agregados (mensajes, actividad), nunca el contenido.</li>
           </ul>
         </section>
@@ -329,6 +361,7 @@
     </div>
   </div>
 
+  <div id="selectorReaccion" class="selector-reaccion oculto" role="menu"></div>
   <div id="toast" class="toast oculto" role="status"></div>
 
   <script src="/socket.io/socket.io.js"></script>

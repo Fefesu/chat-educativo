@@ -215,7 +215,8 @@ function crearBotonEliminar(mensajeId) {
   return btn;
 }
 
-function renderMensajes() {
+function renderMensajes(conservarScrollEn) {
+  if (respondiendoA && respondiendoA.salaId !== salaActiva) limpiarRespuesta();
   chat.innerHTML = '';
   const lista = mensajesPorSala[salaActiva] || [];
   lista.forEach(item => {
@@ -253,24 +254,28 @@ function renderMensajes() {
         : `<img class="imagen-chat" src="${item.imagenDataUrl}" alt="Imagen enviada por ${escapar(item.nick)}">`;
       div.innerHTML = `
         <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
+        ${citaHTML(item)}
         ${cuerpoImg}
         <div class="hora">${item.hora}</div>
+        ${reaccionesHTML(item)}
       `;
-      if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, '[imagen]'));
-      if (esPrivilegiado() && item.id) div.appendChild(crearBotonEliminar(item.id));
+      div.dataset.msgId = item.id || '';
+      agregarAcciones(div, item, '[imagen]');
     } else {
       div.className = 'mensaje' + (item.nick === miNick ? ' propio' : '');
       div.innerHTML = `
         <div class="nick" style="color:${colorDeNick(item.nick)}">${escapar(item.nick)}</div>
+        ${citaHTML(item)}
         <div class="texto">${resaltarMenciones(item.texto)}</div>
         <div class="hora">${item.hora}</div>
+        ${reaccionesHTML(item)}
       `;
-      if (item.nick !== miNick) div.appendChild(crearBotonReportar(item.nick, item.texto));
-      if (esPrivilegiado() && item.id) div.appendChild(crearBotonEliminar(item.id));
+      div.dataset.msgId = item.id || '';
+      agregarAcciones(div, item, item.texto);
     }
     chat.appendChild(div);
   });
-  chat.scrollTop = chat.scrollHeight;
+  chat.scrollTop = conservarScrollEn !== undefined ? conservarScrollEn : chat.scrollHeight;
 }
 
 function renderAvisoEscribiendo() {
@@ -422,7 +427,7 @@ socket.on('mensajeSala', (msg) => {
       if (msg.salaId === salaActiva) renderMensajes();
     }, 3 * 60 * 1000);
   }
-  if (msg.tipo === 'texto' && msg.nick !== miNick && contieneMiMencion(msg.texto)) {
+  if (msg.nick !== miNick && ((msg.tipo === 'texto' && contieneMiMencion(msg.texto)) || (msg.respuesta && msg.respuesta.nick === miNick))) {
     avisarMensajePrivadoNuevo();
   }
   if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
@@ -451,7 +456,10 @@ socket.on('sistema', ({ texto }) => {
 
 socket.on('error_app', (texto) => avisarError(texto));
 
-socket.on('estasBaneado', ({ adminOnline, modsOnline }) => {
+socket.on('estasBaneado', ({ adminOnline, modsOnline, motivo, hasta, nivel }) => {
+  const fechaFin = hasta ? new Date(hasta).toLocaleString('es-ES', { timeZone: 'Europe/Madrid', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+  const cuando = fechaFin ? `Podrás volver a entrar el ${fechaFin} (hora de España).` : 'Este bloqueo no tiene fecha de fin.';
+  const aviso = nivel >= 3 ? '<br>Este es el nivel máximo de bloqueo.' : (nivel > 0 ? '<br>Si vuelve a ocurrir, el siguiente bloqueo será más largo.' : '');
   const textoBoton = adminOnline
     ? 'Contactar con el administrador'
     : modsOnline
@@ -461,7 +469,9 @@ socket.on('estasBaneado', ({ adminOnline, modsOnline }) => {
   document.body.innerHTML = `
     <div class="pantalla-baneado">
       <div class="pantalla-baneado-caja">
-        <h2>🚫 Has sido bloqueado de este chat</h2>
+        <h2>🚫 Tu acceso a La Plaza está bloqueado</h2>
+        <p>Se ha bloqueado tu acceso por un <strong>mal uso del chat</strong>. Aquí cuidamos la educación, el respeto y el buen humor.</p>
+        <p class="motivo-bloqueo"><strong>Motivo:</strong> ${escapar(motivo || 'Uso inadecuado del chat')}<br>${cuando}${aviso}</p>
         <p>Si crees que ha sido un error, puedes dejar un mensaje explicándolo. Quedará guardado y lo revisará el equipo de moderación.</p>
         <textarea id="mensajeApelacion" maxlength="500" placeholder="Escribe aquí tu mensaje..."></textarea>
         <button type="button" id="btnEnviarApelacion">${textoBoton}</button>
@@ -518,13 +528,14 @@ socket.on('listaBaneados', (baneados) => {
     ).join('');
     div.innerHTML = `
       <span><strong>${escapar(b.nick)}</strong></span>
-      <span class="detalle-baneo">Bloqueado por ${escapar(b.baneadoPor)} · ${escapar(b.fecha)}</span>
+      <span class="detalle-baneo">${b.motivo ? escapar(b.motivo) + ' · ' : ''}${b.nivel ? 'nivel ' + b.nivel + ' · ' : ''}${b.hasta ? 'hasta ' + escapar(b.hasta) : 'permanente'}${b.cuenta ? ' · cuenta + IP' : ' · IP'}</span>
+      <span class="detalle-baneo">Por ${escapar(b.baneadoPor)} · ${escapar(b.fecha)}</span>
       ${apelaciones}
     `;
     const btn = document.createElement('button');
     btn.textContent = 'Desbanear';
     btn.addEventListener('click', () => {
-      if (confirm(`¿Desbloquear a ${b.nick}? Podra volver a entrar al chat.`)) {
+      if (confirm(`¿Desbloquear a ${b.nick}? Podrá volver a entrar al chat y este bloqueo no contará como reincidencia.`)) {
         socket.emit('desbanearIP', { ip: b.ip });
       }
     });
@@ -580,13 +591,9 @@ socket.on('listaUsuarios', (usuarios) => {
     }
     if (u.nick !== miNick && u.rol !== 'admin') {
       const btnBan = document.createElement('button');
-      btnBan.textContent = 'Banear IP';
+      btnBan.textContent = 'Bloquear';
       btnBan.className = 'btn-banear';
-      btnBan.addEventListener('click', () => {
-        if (confirm(`¿Bloquear a ${u.nick} de este chat? No podra volver a entrar.`)) {
-          socket.emit('banearIP', { nickObjetivo: u.nick });
-        }
-      });
+      btnBan.addEventListener('click', () => abrirBloqueo(u.nick));
       div.appendChild(btnBan);
     }
     listaUsuariosAdmin.appendChild(div);
@@ -640,7 +647,8 @@ formulario.addEventListener('submit', (e) => {
   e.preventDefault();
   const texto = entrada.value.trim();
   if (!texto || !salaActiva) return;
-  socket.emit('mensajeSala', { salaId: salaActiva, texto });
+  socket.emit('mensajeSala', { salaId: salaActiva, texto, respuestaAId: (respondiendoA && respondiendoA.salaId === salaActiva) ? respondiendoA.id : undefined });
+  limpiarRespuesta();
   socket.emit('dejoEscribir', { salaId: salaActiva });
   clearTimeout(miTimerEscribiendo);
   entrada.value = '';
@@ -1308,7 +1316,7 @@ document.getElementById('btnRetirarImagen').addEventListener('click', () => {
 });
 document.getElementById('btnBloquearAutor').addEventListener('click', () => {
   if (!imagenActual) return;
-  if (confirm(`¿Bloquear la IP de ${imagenActual.nick}? Solo funciona si sigue conectado.`)) socket.emit('banearIP', { nickObjetivo: imagenActual.nick });
+  abrirBloqueo(imagenActual.nick, 'Imágenes no permitidas');
 });
 
 // ================== DIAGNÓSTICO DE IP (ADMIN) ==================
@@ -1321,4 +1329,138 @@ socket.on('diagnosticoIP', (d) => {
     `X-Forwarded-For:       ${d.xff || '—'}\n` +
     `Conexión directa:      ${d.directa || '—'}`;
   salida.classList.remove('oculto');
+});
+
+
+// ================== BLOQUEAR CON MOTIVO (STAFF) ==================
+const modalBloqueo = document.getElementById('modalBloqueo');
+let bloqueoNick = null;
+function abrirBloqueo(nick, motivoPorDefecto) {
+  bloqueoNick = nick;
+  document.getElementById('bloqueoResumen').textContent = `Vas a bloquear a ${nick}. Solo funciona si sigue conectado.`;
+  document.getElementById('bloqueoPrevia').textContent = 'Calculando el nivel del bloqueo…';
+  document.getElementById('bloqueoMotivo').value = motivoPorDefecto || 'Falta de respeto';
+  modalBloqueo.classList.remove('oculto');
+  socket.emit('previsualizarBloqueo', { nickObjetivo: nick });
+}
+socket.on('previaBloqueo', (d) => {
+  if (d.nick !== bloqueoNick) return;
+  document.getElementById('bloqueoPrevia').textContent =
+    `Será el bloqueo nº ${d.previos + 1} de ${d.registrado ? 'esta cuenta (y su IP)' : 'esta IP'}: ${d.duracion}.`;
+});
+document.getElementById('btnCerrarBloqueo').addEventListener('click', () => modalBloqueo.classList.add('oculto'));
+modalBloqueo.addEventListener('click', (e) => { if (e.target === modalBloqueo) modalBloqueo.classList.add('oculto'); });
+document.getElementById('btnConfirmarBloqueo').addEventListener('click', () => {
+  if (!bloqueoNick) return;
+  socket.emit('banearIP', { nickObjetivo: bloqueoNick, motivo: document.getElementById('bloqueoMotivo').value });
+  modalBloqueo.classList.add('oculto');
+  modalImagen.classList.add('oculto');
+  mostrarToast(`${bloqueoNick} bloqueado.`);
+  setTimeout(() => socket.emit('pedirBaneados'), 500);
+});
+
+// ================== RESPONDER Y REACCIONAR ==================
+const REACCIONES = ['👍', '❤️', '😂', '😮', '😢', '🙏'];
+let respondiendoA = null;
+const barraRespuesta = document.getElementById('barraRespuesta');
+const selectorReaccion = document.getElementById('selectorReaccion');
+selectorReaccion.innerHTML = REACCIONES.map(e => `<button type="button" class="emoji-reaccion" data-emoji="${e}">${e}</button>`).join('');
+
+function citaHTML(item) {
+  if (!item.respuesta) return '';
+  const r = item.respuesta;
+  return `<div class="cita" data-ir="${escapar(r.id)}"><b style="color:${colorDeNick(r.nick)}">${escapar(r.nick)}</b><span>${escapar(r.texto)}</span></div>`;
+}
+function reaccionesHTML(item) {
+  const r = item.reacciones || {};
+  const emojis = Object.keys(r).filter(e => r[e].length);
+  if (!emojis.length) return '';
+  return `<div class="reacciones">${emojis.map(e =>
+    `<button type="button" class="chip-reaccion${r[e].includes(miNick) ? ' mia' : ''}" data-emoji="${e}" data-id="${escapar(item.id)}" title="${escapar(r[e].join(', '))}">${e} ${r[e].length}</button>`
+  ).join('')}</div>`;
+}
+function agregarAcciones(div, item, textoReporte) {
+  const barra = document.createElement('div');
+  barra.className = 'acciones-msg';
+  if (item.id && !String(item.id).startsWith('bot_')) {
+    [['responder', '↩', 'Responder'], ['reaccionar', '😊', 'Reaccionar']].forEach(([accion, icono, titulo]) => {
+      const b = document.createElement('button');
+      b.type = 'button'; b.className = 'btn-accion'; b.dataset.accion = accion; b.dataset.id = item.id; b.title = titulo; b.textContent = icono;
+      barra.appendChild(b);
+    });
+  }
+  if (item.nick !== miNick) barra.appendChild(crearBotonReportar(item.nick, textoReporte));
+  if (esPrivilegiado() && item.id) barra.appendChild(crearBotonEliminar(item.id));
+  if (barra.children.length) div.appendChild(barra);
+}
+
+function limpiarRespuesta() {
+  respondiendoA = null;
+  barraRespuesta.classList.add('oculto');
+}
+function empezarRespuesta(item) {
+  respondiendoA = { salaId: salaActiva, id: item.id, nick: item.nick };
+  document.getElementById('textoRespuesta').textContent = `↩ Respondiendo a ${item.nick}: ${item.tipo === 'imagen' ? '📷 Imagen' : String(item.texto).slice(0, 60)}`;
+  barraRespuesta.classList.remove('oculto');
+  entrada.focus();
+}
+document.getElementById('btnCancelarRespuesta').addEventListener('click', limpiarRespuesta);
+entrada.addEventListener('keydown', (e) => { if (e.key === 'Escape') limpiarRespuesta(); });
+
+function cerrarSelectorReaccion() { selectorReaccion.classList.add('oculto'); }
+function abrirSelectorReaccion(boton, mensajeId) {
+  selectorReaccion.dataset.id = mensajeId;
+  selectorReaccion.classList.remove('oculto');
+  const r = boton.getBoundingClientRect();
+  const ancho = selectorReaccion.offsetWidth;
+  selectorReaccion.style.top = Math.max(8, r.top - 52) + 'px';
+  selectorReaccion.style.left = Math.min(window.innerWidth - ancho - 8, Math.max(8, r.left - ancho / 2)) + 'px';
+}
+selectorReaccion.addEventListener('click', (e) => {
+  const b = e.target.closest('.emoji-reaccion');
+  if (!b) return;
+  socket.emit('reaccionar', { salaId: salaActiva, mensajeId: selectorReaccion.dataset.id, emoji: b.dataset.emoji });
+  cerrarSelectorReaccion();
+});
+document.addEventListener('click', (e) => {
+  const ruta = e.composedPath();
+  if (!ruta.includes(selectorReaccion) && !ruta.some(n => n.classList && n.classList.contains('btn-accion'))) cerrarSelectorReaccion();
+});
+
+chat.addEventListener('click', (e) => {
+  const accion = e.target.closest('.btn-accion');
+  if (accion) {
+    if (accion.dataset.accion === 'reaccionar') { abrirSelectorReaccion(accion, accion.dataset.id); return; }
+    const item = (mensajesPorSala[salaActiva] || []).find(m => m.id === accion.dataset.id);
+    if (item) empezarRespuesta(item);
+    return;
+  }
+  const chip = e.target.closest('.chip-reaccion');
+  if (chip) { socket.emit('reaccionar', { salaId: salaActiva, mensajeId: chip.dataset.id, emoji: chip.dataset.emoji }); return; }
+  const cita = e.target.closest('.cita');
+  if (cita) {
+    const destino = Array.from(chat.querySelectorAll('[data-msg-id]')).find(n => n.dataset.msgId === cita.dataset.ir);
+    if (destino) {
+      destino.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      destino.classList.add('resaltado');
+      setTimeout(() => destino.classList.remove('resaltado'), 1600);
+    }
+    return;
+  }
+  // En pantallas táctiles, tocar un mensaje muestra sus acciones
+  const m = e.target.closest('.mensaje');
+  if (m && !e.target.closest('button, a, img')) {
+    chat.querySelectorAll('.mensaje.activo').forEach(x => { if (x !== m) x.classList.remove('activo'); });
+    m.classList.toggle('activo');
+  }
+});
+
+socket.on('reacciones', ({ salaId, mensajeId, reacciones }) => {
+  const item = (mensajesPorSala[salaId] || []).find(m => m.id === mensajeId);
+  if (!item) return;
+  item.reacciones = reacciones;
+  if (salaId === salaActiva) {
+    const alFinal = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
+    renderMensajes(alFinal ? undefined : chat.scrollTop);
+  }
 });
