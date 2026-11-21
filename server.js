@@ -102,6 +102,7 @@ function generarNick() {
 // ---- Conexion a la base de datos (guarda cuentas de forma permanente) ----
 let usuariosCol = null;
 let notasStaffCol = null;
+let salasFijasCol = null;
 let estadisticasCol = null;
 let tokensCuentaCol = null;
 
@@ -140,9 +141,11 @@ async function conectarDB() {
   estadisticasCol = cliente.db('chat_educativo').collection('estadisticas');
   tokensCuentaCol = cliente.db('chat_educativo').collection('tokensCuenta');
   historialBloqueosCol = cliente.db('chat_educativo').collection('historialBloqueos');
+  salasFijasCol = cliente.db('chat_educativo').collection('salasFijas');
   await tokensCuentaCol.createIndex({ expira: 1 }, { expireAfterSeconds: 0 }); // Mongo borra los enlaces caducados
   await tokensCuentaCol.createIndex({ hash: 1 });
   await cargarBaneados();
+  await cargarSalasFijas();
   console.log('Conectado a la base de datos correctamente');
 }
 
@@ -168,6 +171,34 @@ function esModOAdmin(socketId) {
   return socketId === adminSocketId || moderadores.has(socketId);
 }
 
+// ---- Salas fijas: sobreviven a reinicios porque se guardan en la base de datos ----
+async function cargarSalasFijas() {
+  if (!salasFijasCol) return;
+  try {
+    const docs = await salasFijasCol.find({}).toArray();
+    docs.forEach(d => {
+      if (!d._id || salas.has(d._id)) return;
+      salas.set(d._id, { id: d._id, nombre: d.nombre, creador: d.creador || 'sistema', usuarios: new Set(), vacioDesde: null, permanente: true });
+    });
+  } catch (e) { console.log('No se pudieron cargar las salas fijas:', e.message); }
+}
+function guardarSalaFija(sala) {
+  if (!salasFijasCol) return;
+  salasFijasCol.updateOne({ _id: sala.id }, { $set: { nombre: sala.nombre, creador: sala.creador } }, { upsert: true }).catch(() => {});
+}
+function borrarSalaFija(id) {
+  if (!salasFijasCol) return;
+  salasFijasCol.deleteOne({ _id: id }).catch(() => {});
+}
+
+// Salas en las que esta el usuario, sin contar La Plaza ni la sala Staff ni salas ya borradas
+function salasPropiasDe(socket) {
+  return Array.from(socket.data.salasUnidas).filter(id => {
+    const sl = salas.get(id);
+    return sl && !sl.fija && !sl.oculta;
+  }).length;
+}
+
 function listaSalas() {
   return Array.from(salas.values()).map(s => ({
     id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, fija: !!s.fija
@@ -181,7 +212,8 @@ function listaSalasPara(socketId) {
     .filter(s => !s.oculta || privilegiado)
     .map(s => ({
       id: s.id, nombre: s.nombre, numUsuarios: s.usuarios.size, permanente: !!s.permanente, fija: !!s.fija,
-      puedeCerrar: !s.oculta && !s.fija && (privilegiado || s.creador === miNickActual)
+      puedeCerrar: !s.oculta && !s.fija && (privilegiado || (s.creador === miNickActual && !s.permanente)),
+      puedeFijar: privilegiado && !s.oculta && !s.fija
     }));
 }
 
@@ -209,13 +241,45 @@ function usuariosDeSala(sala) {
   return Array.from(sala.usuarios).map(id => usuariosConectados.get(id)).filter(Boolean);
 }
 
+// Une al socket a una sala (idempotente). "auto" = entrada automatica: el cliente no cambia de pestana.
+function unirseASala(socket, sala, auto) {
+  socket.join(sala.id);
+  sala.usuarios.add(socket.id);
+  socket.data.salasUnidas.add(sala.id);
+  marcarEstadoVacio(sala);
+  socket.emit('unido', { salaId: sala.id, auto: !!auto });
+}
+
+function abandonarSala(socket, salaId, avisar) {
+  const sala = salas.get(salaId);
+  socket.leave(salaId);
+  socket.data.salasUnidas.delete(salaId);
+  if (sala) {
+    sala.usuarios.delete(socket.id);
+    marcarEstadoVacio(sala);
+    io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
+  }
+  if (avisar) socket.emit('salaAbandonada', { salaId });
+}
+
 function unirseAStaff(socket) {
   const sala = salas.get('staff');
   if (!sala) return;
-  socket.join('staff');
-  sala.usuarios.add(socket.id);
-  socket.data.salasUnidas.add('staff');
+  unirseASala(socket, sala, true);
   enviarHistorialStaff(socket);
+}
+
+// Admin y moderadores entran siempre a La Plaza, a la sala Staff y a todas las salas existentes
+// (pueden salir despues de cualquiera de ellas si quieren).
+function unirStaffATodas(socket) {
+  const plaza = salas.get('plaza');
+  if (plaza && !socket.data.salasUnidas.has('plaza')) unirseASala(socket, plaza, true);
+  if (!socket.data.salasUnidas.has('staff')) unirseAStaff(socket);
+  salas.forEach(sala => {
+    if (sala.oculta || sala.fija) return;
+    if (!socket.data.salasUnidas.has(sala.id)) unirseASala(socket, sala, true);
+  });
+  salas.forEach(sala => io.emit('usuariosDeSala', { salaId: sala.id, usuarios: usuariosDeSala(sala) }));
 }
 
 // Historial de la sala staff: siempre se conservan como máximo 100 entradas.
@@ -484,7 +548,8 @@ io.on('connection', (socket) => {
     const nickAnterior = usuariosConectados.get(socket.id);
     if (adminSocketId === socket.id) adminSocketId = null;
     moderadores.delete(socket.id);
-    salirDeStaff(socket);
+    Array.from(socket.data.privados.values()).forEach(canalId => cerrarPrivadoInterno(socket, canalId, 'cerrado'));
+    Array.from(socket.data.salasUnidas).forEach(id => abandonarSala(socket, id, false));
     socket.data.registrado = false;
     socket.data.usuario = null;
 
@@ -622,7 +687,7 @@ io.on('connection', (socket) => {
     socket.data.usuario = usuario;
     if (rol === 'admin') adminSocketId = socket.id;
     if (rol === 'moderador') moderadores.add(socket.id);
-    if (rol === 'admin' || rol === 'moderador') unirseAStaff(socket);
+    if (rol === 'admin' || rol === 'moderador') unirStaffATodas(socket);
     io.emit('totalConectados', usuariosConectados.size);
     emitirSalasATodos();
   }
@@ -631,41 +696,59 @@ io.on('connection', (socket) => {
   socket.on('crearSala', ({ nombre }) => {
     const nombreLimpio = String(nombre || '').trim().slice(0, 30);
     if (!nombreLimpio) return;
+    const privilegiado = esModOAdmin(socket.id);
     const salasVisibles = Array.from(salas.values()).filter(s => !s.oculta && !s.fija).length;
     if (salasVisibles >= MAX_SALAS) { socket.emit('error_app', 'Ya existen 10 salas, el maximo permitido.'); return; }
+    if (!privilegiado && salasPropiasDe(socket) >= MAX_SALAS_POR_USUARIO) {
+      socket.emit('error_app', `Ya estas en ${MAX_SALAS_POR_USUARIO} salas. Sal de alguna para poder crear otra.`);
+      return;
+    }
     const id = 'sala_' + Date.now() + '_' + Math.floor(Math.random() * 1000);
-    const permanente = esModOAdmin(socket.id);
-    salas.set(id, { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set(), vacioDesde: permanente ? null : Date.now(), permanente });
+    const sala = { id, nombre: nombreLimpio, creador: usuariosConectados.get(socket.id), usuarios: new Set(), vacioDesde: null, permanente: privilegiado };
+    salas.set(id, sala);
+    if (sala.permanente) guardarSalaFija(sala);
+    // Quien la crea entra directamente; el staff conectado (admin y moderadores) tambien, para tenerla controlada
+    unirseASala(socket, sala, false);
+    io.sockets.sockets.forEach(s => {
+      if (s.id !== socket.id && esModOAdmin(s.id) && s.data.salasUnidas) unirseASala(s, sala, true);
+    });
     emitirSalasATodos();
+    io.emit('usuariosDeSala', { salaId: id, usuarios: usuariosDeSala(sala) });
     io.emit('sistema', { texto: `${usuariosConectados.get(socket.id)} ha creado la sala "${nombreLimpio}"` });
+  });
+
+  // ---- Fijar / desfijar una sala (solo staff). Una sala fija no se borra aunque quede vacia ----
+  socket.on('fijarSala', ({ salaId, fijar }) => {
+    if (!esModOAdmin(socket.id)) return;
+    const sala = salas.get(salaId);
+    if (!sala || sala.oculta || sala.fija) return;
+    sala.permanente = !!fijar;
+    if (sala.permanente) { sala.vacioDesde = null; guardarSalaFija(sala); }
+    else { marcarEstadoVacio(sala); borrarSalaFija(sala.id); }
+    emitirSalasATodos();
+    io.emit('sistema', { texto: sala.permanente ? `La sala "${sala.nombre}" ha quedado fija` : `La sala "${sala.nombre}" ya no esta fija` });
   });
 
   // ---- Unirse a sala ----
   socket.on('unirseSala', ({ salaId }) => {
     const sala = salas.get(salaId);
     if (!sala) return;
-    const yaUnido = socket.data.salasUnidas.has(salaId);
     const privilegiado = esModOAdmin(socket.id);
-    const enSalasPropias = Array.from(socket.data.salasUnidas).filter(id => !(salas.get(id) && salas.get(id).fija)).length;
-    if (!yaUnido && !privilegiado && !sala.fija && enSalasPropias >= MAX_SALAS_POR_USUARIO) {
+    if (sala.oculta && !privilegiado) return;
+    const yaUnido = socket.data.salasUnidas.has(salaId);
+    if (!yaUnido && !privilegiado && !sala.fija && salasPropiasDe(socket) >= MAX_SALAS_POR_USUARIO) {
       socket.emit('error_app', `Solo puedes estar en ${MAX_SALAS_POR_USUARIO} salas a la vez. Sal de alguna para entrar en esta.`);
       return;
     }
-    socket.join(salaId);
-    sala.usuarios.add(socket.id);
-    socket.data.salasUnidas.add(salaId);
-    marcarEstadoVacio(sala);
-    socket.emit('unido', { salaId });
+    unirseASala(socket, sala, false);
+    if (salaId === 'staff') enviarHistorialStaff(socket);
     emitirSalasATodos();
     io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) });
   });
 
   // ---- Salir de sala ----
   socket.on('salirSala', ({ salaId }) => {
-    const sala = salas.get(salaId);
-    socket.leave(salaId);
-    socket.data.salasUnidas.delete(salaId);
-    if (sala) { sala.usuarios.delete(socket.id); marcarEstadoVacio(sala); io.emit('usuariosDeSala', { salaId, usuarios: usuariosDeSala(sala) }); }
+    abandonarSala(socket, salaId, true);
     emitirSalasATodos();
   });
 
@@ -674,7 +757,7 @@ io.on('connection', (socket) => {
     const sala = salas.get(salaId);
     if (!sala) return;
     const privilegiado = esModOAdmin(socket.id);
-    if (!privilegiado && !socket.data.salasUnidas.has(salaId)) return;
+    if (!socket.data.salasUnidas.has(salaId)) return;
 
     if (estaEnFlood(socket.id)) {
       socket.emit('error_app', 'Estas enviando mensajes demasiado rapido. Espera unos segundos.');
@@ -771,7 +854,7 @@ io.on('connection', (socket) => {
     if (adminSocketId && adminSocketId !== socket.id) { socket.emit('error_app', 'Ya hay un administrador asignado en este chat.'); return; }
     if (clave !== ADMIN_KEY) { socket.emit('error_app', 'Clave incorrecta.'); return; }
     adminSocketId = socket.id;
-    unirseAStaff(socket);
+    unirStaffATodas(socket);
     if (usuariosCol) await usuariosCol.updateOne({ usuario: socket.data.usuario }, { $set: { rol: 'admin' } });
     socket.emit('rolAsignado', { rol: 'admin' });
     emitirSalasATodos();
@@ -817,7 +900,7 @@ io.on('connection', (socket) => {
     if (destino) {
       moderadores.add(destino[0]);
       const socketDestino = io.sockets.sockets.get(destino[0]);
-      if (socketDestino) unirseAStaff(socketDestino);
+      if (socketDestino) unirStaffATodas(socketDestino);
       io.to(destino[0]).emit('rolAsignado', { rol: 'moderador' });
     }
     io.emit('sistema', { texto: `${nombreReal} es ahora moderador` });
@@ -838,7 +921,10 @@ io.on('connection', (socket) => {
     if (destino) {
       moderadores.delete(destino[0]);
       const socketDestino = io.sockets.sockets.get(destino[0]);
-      if (socketDestino) salirDeStaff(socketDestino);
+      if (socketDestino) {
+        // Vuelve a ser usuario normal: se queda solo en La Plaza
+        Array.from(socketDestino.data.salasUnidas).filter(id => id !== 'plaza').forEach(id => abandonarSala(socketDestino, id, true));
+      }
       io.to(destino[0]).emit('rolAsignado', { rol: 'usuario' });
     }
     io.emit('sistema', { texto: `${nombreReal} ya no es moderador` });
@@ -1000,7 +1086,7 @@ io.on('connection', (socket) => {
     if (!nickObjetivo || nickObjetivo === miNick) return;
     if (socket.data.privados.has(nickObjetivo)) {
       const canalExistente = socket.data.privados.get(nickObjetivo);
-      socket.emit('privadoAbierto', { canalId: canalExistente, conNick: nickObjetivo });
+      socket.emit('privadoAbierto', { canalId: canalExistente, conNick: nickObjetivo, iniciaste: true });
       return;
     }
     const otro = socketPorNick(nickObjetivo);
@@ -1018,8 +1104,8 @@ io.on('connection', (socket) => {
     otro.join(canalId);
     socket.data.privados.set(nickObjetivo, canalId);
     otro.data.privados.set(miNick, canalId);
-    socket.emit('privadoAbierto', { canalId, conNick: nickObjetivo });
-    otro.emit('privadoAbierto', { canalId, conNick: miNick });
+    socket.emit('privadoAbierto', { canalId, conNick: nickObjetivo, iniciaste: true });
+    otro.emit('privadoAbierto', { canalId, conNick: miNick, iniciaste: false });
   });
 
   socket.on('mensajePrivado', ({ canalId, texto }) => {
@@ -1089,7 +1175,7 @@ io.on('connection', (socket) => {
     const esCreador = sala.creador === usuariosConectados.get(socket.id);
     const esPriv = esModOAdmin(socket.id);
 
-    if (!esPriv && !esCreador) { socket.emit('error_app', 'No puedes cerrar esta sala.'); return; }
+    if (!esPriv && (!esCreador || sala.permanente)) { socket.emit('error_app', 'No puedes cerrar esta sala.'); return; }
 
     if (!esPriv && esCreador) {
       const hayOtrosDentro = Array.from(sala.usuarios).some(id => id !== socket.id);
@@ -1100,6 +1186,7 @@ io.on('connection', (socket) => {
     }
 
     salas.delete(salaId);
+    borrarSalaFija(salaId);
     io.socketsLeave(salaId);
     emitirSalasATodos();
     io.emit('salaEliminada', { salaId });
@@ -1146,8 +1233,10 @@ io.on('connection', (socket) => {
   // ---- Desconexion ----
   socket.on('disconnect', () => {
     const nickSaliente = usuariosConectados.get(socket.id);
-    Array.from(socket.data.privados.values()).forEach(canalId => {
+    socket.data.privados.forEach((canalId, otroNick) => {
       io.to(canalId).emit('privadoCerrado', { canalId, motivo: 'desconexion', porQuien: nickSaliente });
+      const otro = socketPorNick(otroNick);
+      if (otro) { otro.leave(canalId); otro.data.privados.delete(nickSaliente); }
     });
     usuariosConectados.delete(socket.id);
     salas.forEach(sala => {

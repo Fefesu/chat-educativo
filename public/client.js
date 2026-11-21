@@ -38,13 +38,18 @@ const listaConectadosSala = document.getElementById('listaConectadosSala');
 const contadorConectadosSala = document.getElementById('contadorConectadosSala');
 const btnAdjuntar = document.getElementById('btnAdjuntar');
 const inputArchivo = document.getElementById('inputArchivo');
-const privadosContenedor = document.getElementById('privadosContenedor');
+const barraPrivado = document.getElementById('barraPrivado');
+const barraPrivadoTitulo = document.getElementById('barraPrivadoTitulo');
+const btnSilenciarPrivado = document.getElementById('btnSilenciarPrivado');
+const btnCerrarPrivado = document.getElementById('btnCerrarPrivado');
+const tituloConectados = document.getElementById('tituloConectados');
 const cabeceraBaneados = document.getElementById('cabeceraBaneados');
 const flechaBaneados = document.getElementById('flechaBaneados');
 const listaBaneadosEl = document.getElementById('listaBaneadosEl');
 
 const usuariosPorSala = {}; // salaId -> array de nicks presentes ahora mismo
-const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true }
+const privados = {}; // canalId -> { conNick, mensajes: [], conectado: true, sinLeer: 0 }
+let privadoActivo = null; // canalId del privado que se ve en el centro (o null si se ve una sala)
 
 // ---- Usuarios silenciados/ignorados (se guarda en este navegador) ----
 const usuariosIgnorados = new Set(JSON.parse(localStorage.getItem('ignorados') || '[]'));
@@ -101,6 +106,9 @@ let miRol = 'usuario';
 let salasDisponibles = [];
 let salasUnidas = new Set();
 let salaActiva = null;
+
+// ¿Se está viendo ahora mismo esta sala en el centro? (no si hay un privado abierto)
+function salaVisible(id) { return !privadoActivo && id === salaActiva; }
 const mensajesPorSala = {};
 const escribiendoPorSala = {}; // salaId -> Set de nicks escribiendo
 const timersEscribiendo = {};  // "salaId:nick" -> timeout id
@@ -153,7 +161,32 @@ function esPrivilegiado() {
 }
 
 function idsAMostrarComoPestañas() {
-  return esPrivilegiado() ? salasDisponibles.map(s => s.id) : Array.from(salasUnidas);
+  // Pestañas = salas en las que estoy (el staff entra automáticamente en todas)
+  return Array.from(salasUnidas);
+}
+
+function privadoActual() { return privadoActivo ? privados[privadoActivo] : null; }
+
+function activarSala(id) {
+  privadoActivo = null;
+  salaActiva = id;
+  renderTodoElCentro();
+  socket.emit('pedirUsuariosDeSala', { salaId: id });
+}
+
+function activarPrivado(canalId) {
+  if (!privados[canalId]) return;
+  privadoActivo = canalId;
+  privados[canalId].sinLeer = 0;
+  privados[canalId].nuevo = false;
+  renderTodoElCentro();
+  cerrarDrawers();
+}
+
+function renderTodoElCentro() {
+  renderListaSalas();
+  renderPestañas();
+  renderMensajes();
 }
 
 function nombreDeSala(id) {
@@ -164,29 +197,63 @@ function nombreDeSala(id) {
 function renderPestañas() {
   const ids = idsAMostrarComoPestañas();
   pestañasEl.innerHTML = '';
+  if (privadoActivo && !privados[privadoActivo]) privadoActivo = null;
   if (!ids.includes(salaActiva)) salaActiva = ids[0] || null;
 
   ids.forEach(id => {
     const b = document.createElement('button');
     const color = colorDeSala(id);
-    const activa = id === salaActiva;
+    const activa = !privadoActivo && id === salaActiva;
     b.className = 'pestaña' + (activa ? ' activa' : '');
     b.style.setProperty('--c', color);
-    b.textContent = nombreDeSala(id);
-    b.addEventListener('click', () => {
-      salaActiva = id;
-      renderPestañas();
-      renderMensajes();
-      renderAvisoEscribiendo();
-      socket.emit('pedirUsuariosDeSala', { salaId: id });
-    });
+    b.textContent = nombreDeSala(id) || '…';
+    b.addEventListener('click', () => activarSala(id));
     pestañasEl.appendChild(b);
   });
 
-  entrada.disabled = !salaActiva;
-  entrada.placeholder = salaActiva ? 'Escribe algo con respeto y buen humor...' : 'Entra en una sala para escribir';
+  // Chats privados: una pestaña por persona, con su nombre
+  Object.keys(privados).forEach(canalId => {
+    const p = privados[canalId];
+    const b = document.createElement('button');
+    b.className = 'pestaña pestaña-privada' + (canalId === privadoActivo ? ' activa' : '') + ((p.sinLeer || p.nuevo) ? ' con-nuevo' : '');
+    b.style.setProperty('--c', '#0FA3B1');
+    b.title = 'Chat privado con ' + p.conNick;
+    b.textContent = '🔒 ' + p.conNick + (p.conectado ? '' : ' (desconectado)');
+    if (p.sinLeer || p.nuevo) {
+      const n = document.createElement('span');
+      n.className = 'pestaña-aviso';
+      n.textContent = p.sinLeer ? (p.sinLeer > 9 ? '9+' : String(p.sinLeer)) : '•';
+      b.appendChild(n);
+    }
+    b.addEventListener('click', () => activarPrivado(canalId));
+    pestañasEl.appendChild(b);
+  });
+
+  renderBarraPrivado();
+  actualizarCompositor();
   renderAvisoEscribiendo();
   renderListaConectadosSala();
+}
+
+function renderBarraPrivado() {
+  const p = privadoActual();
+  barraPrivado.classList.toggle('oculto', !p);
+  if (!p) return;
+  barraPrivadoTitulo.textContent = `Chat privado con ${p.conNick}${p.conectado ? '' : ' (se ha desconectado)'}`;
+  btnSilenciarPrivado.textContent = usuariosIgnorados.has(p.conNick) ? '🔇 Silenciado' : '🔊 Silenciar';
+}
+
+function actualizarCompositor() {
+  const p = privadoActual();
+  if (p) {
+    entrada.disabled = !p.conectado;
+    btnAdjuntar.disabled = !p.conectado;
+    entrada.placeholder = p.conectado ? `Mensaje privado para ${p.conNick}...` : 'Esta persona se ha desconectado';
+  } else {
+    entrada.disabled = !salaActiva;
+    btnAdjuntar.disabled = !salaActiva;
+    entrada.placeholder = salaActiva ? 'Escribe algo con respeto y buen humor...' : 'Entra en una sala para escribir';
+  }
 }
 
 function crearBotonReportar(nickReportado, texto) {
@@ -215,7 +282,31 @@ function crearBotonEliminar(mensajeId) {
   return btn;
 }
 
+function renderMensajesPrivadoCentro(p) {
+  chat.innerHTML = '';
+  if (usuariosIgnorados.has(p.conNick)) {
+    chat.innerHTML = '<p class="aviso-silenciado">🔇 Has silenciado a esta persona. Ya no ves sus mensajes.</p>';
+    return;
+  }
+  if (p.mensajes.length === 0) {
+    chat.innerHTML = `<p class="aviso-silenciado">Aquí empieza tu conversación privada con ${escapar(p.conNick)}. Nadie más puede verla.</p>`;
+    return;
+  }
+  p.mensajes.forEach(m => {
+    const div = document.createElement('div');
+    div.className = 'mensaje' + (m.nick === miNick ? ' propio' : '');
+    const cuerpo = m.tipo === 'imagen'
+      ? `<img class="imagen-chat" src="${m.imagenDataUrl}" alt="Imagen privada">`
+      : `<div class="texto">${escapar(m.texto)}</div>`;
+    div.innerHTML = `<div class="nick" style="color:${colorDeNick(m.nick)}">${escapar(m.nick)}</div>${cuerpo}<div class="hora">${m.hora}</div>`;
+    chat.appendChild(div);
+  });
+  chat.scrollTop = chat.scrollHeight;
+}
+
 function renderMensajes(conservarScrollEn) {
+  const priv = privadoActual();
+  if (priv) { limpiarRespuesta(); renderMensajesPrivadoCentro(priv); return; }
   if (respondiendoA && respondiendoA.salaId !== salaActiva) limpiarRespuesta();
   chat.innerHTML = '';
   const lista = mensajesPorSala[salaActiva] || [];
@@ -279,6 +370,7 @@ function renderMensajes(conservarScrollEn) {
 }
 
 function renderAvisoEscribiendo() {
+  if (privadoActivo) { avisoEscribiendo.textContent = ''; return; }
   const set = escribiendoPorSala[salaActiva];
   if (!set || set.size === 0) { avisoEscribiendo.textContent = ''; return; }
   const nombres = Array.from(set);
@@ -288,13 +380,15 @@ function renderAvisoEscribiendo() {
 }
 
 function renderListaConectadosSala() {
-  const nicks = usuariosPorSala[salaActiva] || [];
+  const priv = privadoActual();
+  if (tituloConectados) tituloConectados.textContent = priv ? 'En este privado' : 'En esta sala';
+  const nicks = priv ? (priv.conectado ? [miNick, priv.conNick] : [miNick]) : (usuariosPorSala[salaActiva] || []);
   contadorConectadosSala.textContent = nicks.length;
   listaConectadosSala.innerHTML = '';
   nicks.forEach(n => {
     const div = document.createElement('div');
     div.className = 'item-conectado';
-    const escribiendoAhora = escribiendoPorSala[salaActiva] && escribiendoPorSala[salaActiva].has(n);
+    const escribiendoAhora = !priv && escribiendoPorSala[salaActiva] && escribiendoPorSala[salaActiva].has(n);
     const bocadillo = escribiendoAhora
       ? '<span class="bocadillo-escribiendo"><span></span><span></span><span></span></span>'
       : '';
@@ -310,22 +404,27 @@ function renderListaConectadosSala() {
 }
 
 function renderListaSalas() {
-  const salasVisiblesCount = salasDisponibles.filter(s => s.id !== 'staff').length;
+  // El contador no incluye La Plaza (fija) ni la sala Staff (oculta)
+  const salasVisiblesCount = salasDisponibles.filter(s => s.id !== 'staff' && !s.fija).length;
   contadorSalas.textContent = `(${salasVisiblesCount}/10)`;
   listaSalasEl.innerHTML = '';
   salasDisponibles.forEach(s => {
     const unido = salasUnidas.has(s.id);
     const div = document.createElement('div');
-    div.className = 'item-sala' + (s.id === salaActiva && (unido || esPrivilegiado()) ? ' activa' : '');
+    div.className = 'item-sala' + (s.id === salaActiva && !privadoActivo && unido ? ' activa' : '');
     div.style.setProperty('--c', colorDeSala(s.id));
+    const icono = s.fija ? '🏛️ ' : ((s.permanente && s.id !== 'staff') ? '📌 ' : '');
     div.innerHTML = `
-      <span>${s.fija ? '🏛️ ' : (s.permanente ? '🔒 ' : '')}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
+      <span>${icono}${escapar(s.nombre)} <small>(${s.numUsuarios})</small></span>
     `;
+    if (unido) {
+      const nombreEl = div.querySelector('span');
+      nombreEl.style.cursor = 'pointer';
+      nombreEl.title = 'Ver esta sala';
+      nombreEl.addEventListener('click', () => { activarSala(s.id); cerrarDrawers(); });
+    }
     const btn = document.createElement('button');
-    if (esPrivilegiado()) {
-      btn.textContent = 'Ver';
-      btn.addEventListener('click', () => { salaActiva = s.id; renderPestañas(); renderMensajes(); });
-    } else if (unido) {
+    if (unido) {
       btn.textContent = 'Salir';
       btn.addEventListener('click', () => socket.emit('salirSala', { salaId: s.id }));
     } else {
@@ -333,6 +432,16 @@ function renderListaSalas() {
       btn.addEventListener('click', () => socket.emit('unirseSala', { salaId: s.id }));
     }
     div.appendChild(btn);
+
+    if (s.puedeFijar) {
+      const btnFijar = document.createElement('button');
+      btnFijar.type = 'button';
+      btnFijar.textContent = '📌';
+      btnFijar.className = 'btn-fijar-sala' + (s.permanente ? ' fijada' : '');
+      btnFijar.title = s.permanente ? 'Dejar de fijar esta sala' : 'Dejar esta sala fija';
+      btnFijar.addEventListener('click', () => socket.emit('fijarSala', { salaId: s.id, fijar: !s.permanente }));
+      div.appendChild(btnFijar);
+    }
 
     if (s.puedeCerrar) {
       const btnBorrar = document.createElement('button');
@@ -382,39 +491,49 @@ socket.on('salasActualizadas', (salas) => {
 
 socket.on('usuariosDeSala', ({ salaId, usuarios }) => {
   usuariosPorSala[salaId] = usuarios;
-  if (salaId === salaActiva) renderListaConectadosSala();
+  if (salaVisible(salaId)) renderListaConectadosSala();
+  else if (privadoActivo) renderListaConectadosSala();
 });
 
 socket.on('historialStaff', (mensajes) => {
   mensajesPorSala['staff'] = mensajes.map(m => ({ ...m, tipo: m.tipo || 'texto', salaId: 'staff' }));
-  if (salaActiva === 'staff') renderMensajes();
+  if (salaVisible('staff')) renderMensajes();
 });
 
-socket.on('unido', ({ salaId }) => {
+socket.on('unido', ({ salaId, auto }) => {
   salasUnidas.add(salaId);
-  salaActiva = salaId;
   if (!mensajesPorSala[salaId]) mensajesPorSala[salaId] = [];
+  // Entrada automática (La Plaza, Staff, salas nuevas para el staff): no te cambia lo que estás viendo,
+  // salvo que no estuvieras viendo ninguna sala
+  if (!auto || (!salaActiva && !privadoActivo)) { salaActiva = salaId; if (!auto) privadoActivo = null; }
   renderListaSalas();
   renderPestañas();
   renderMensajes();
+  if (!auto) socket.emit('pedirUsuariosDeSala', { salaId });
+});
+
+socket.on('salaAbandonada', ({ salaId }) => {
+  salasUnidas.delete(salaId);
+  if (salaActiva === salaId) salaActiva = null;
+  renderTodoElCentro();
 });
 
 socket.on('escribiendo', ({ salaId, nick }) => {
   if (!escribiendoPorSala[salaId]) escribiendoPorSala[salaId] = new Set();
   escribiendoPorSala[salaId].add(nick);
-  if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
+  if (salaVisible(salaId)) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
 
   const clave = `${salaId}:${nick}`;
   clearTimeout(timersEscribiendo[clave]);
   timersEscribiendo[clave] = setTimeout(() => {
     escribiendoPorSala[salaId] && escribiendoPorSala[salaId].delete(nick);
-    if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
+    if (salaVisible(salaId)) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
   }, 3000);
 });
 
 socket.on('dejoEscribir', ({ salaId, nick }) => {
   if (escribiendoPorSala[salaId]) escribiendoPorSala[salaId].delete(nick);
-  if (salaId === salaActiva) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
+  if (salaVisible(salaId)) { renderAvisoEscribiendo(); renderListaConectadosSala(); }
 });
 
 socket.on('mensajeSala', (msg) => {
@@ -424,13 +543,13 @@ socket.on('mensajeSala', (msg) => {
   if (msg.tipo === 'imagen') {
     setTimeout(() => {
       msg.eliminada = true;
-      if (msg.salaId === salaActiva) renderMensajes();
+      if (salaVisible(msg.salaId)) renderMensajes();
     }, 3 * 60 * 1000);
   }
   if (msg.nick !== miNick && ((msg.tipo === 'texto' && contieneMiMencion(msg.texto)) || (msg.respuesta && msg.respuesta.nick === miNick))) {
     avisarMensajePrivadoNuevo();
   }
-  if (msg.salaId === salaActiva) { renderMensajes(); renderAvisoEscribiendo(); }
+  if (salaVisible(msg.salaId)) { renderMensajes(); renderAvisoEscribiendo(); }
 });
 
 socket.on('mensajeEliminado', ({ salaId, mensajeId }) => {
@@ -438,7 +557,7 @@ socket.on('mensajeEliminado', ({ salaId, mensajeId }) => {
   if (!lista) return;
   const msg = lista.find(m => m.id === mensajeId);
   if (msg) msg.eliminadoManual = true;
-  if (salaId === salaActiva) renderMensajes();
+  if (salaVisible(salaId)) renderMensajes();
 });
 
 socket.on('salaEliminada', ({ salaId }) => {
@@ -603,6 +722,11 @@ socket.on('listaUsuarios', (usuarios) => {
 socket.on('sesionCerrada', ({ nick }) => {
   miNick = nick;
   miRol = 'usuario';
+  salasUnidas.clear();
+  salaActiva = null;
+  privadoActivo = null;
+  Object.keys(privados).forEach(k => delete privados[k]);
+  Object.keys(mensajesPorSala).forEach(k => delete mensajesPorSala[k]);
   cuentaAnonima.classList.remove('oculto');
   cuentaConectada.classList.add('oculto');
   usuarioInput.value = '';
@@ -635,7 +759,7 @@ socket.on('sesionIniciada', ({ usuario, rol }) => {
 
 // ---- Acciones del usuario ----
 entrada.addEventListener('input', () => {
-  if (!salaActiva) return;
+  if (!salaActiva || privadoActivo) return;
   socket.emit('escribiendo', { salaId: salaActiva });
   clearTimeout(miTimerEscribiendo);
   miTimerEscribiendo = setTimeout(() => {
@@ -646,6 +770,13 @@ entrada.addEventListener('input', () => {
 formulario.addEventListener('submit', (e) => {
   e.preventDefault();
   const texto = entrada.value.trim();
+  const priv = privadoActual();
+  if (priv) {
+    if (!texto || !priv.conectado) return;
+    socket.emit('mensajePrivado', { canalId: privadoActivo, texto });
+    entrada.value = '';
+    return;
+  }
   if (!texto || !salaActiva) return;
   socket.emit('mensajeSala', { salaId: salaActiva, texto, respuestaAId: (respondiendoA && respondiendoA.salaId === salaActiva) ? respondiendoA.id : undefined });
   limpiarRespuesta();
@@ -765,7 +896,9 @@ function manejarArchivoSeleccionado(file, destino) {
 
 btnAdjuntar.addEventListener('click', () => inputArchivo.click());
 inputArchivo.addEventListener('change', () => {
-  if (inputArchivo.files[0]) manejarArchivoSeleccionado(inputArchivo.files[0], { tipo: 'sala' });
+  if (inputArchivo.files[0]) {
+    manejarArchivoSeleccionado(inputArchivo.files[0], privadoActivo ? { tipo: 'privado', canalId: privadoActivo } : { tipo: 'sala' });
+  }
   inputArchivo.value = '';
 });
 
@@ -840,118 +973,74 @@ document.addEventListener('click', (e) => {
   if (!ruta.includes(panelEmoji) && !ruta.includes(btnEmoji)) panelEmoji.classList.add('oculto');
 });
 
-// ---- Chats privados (ventanas flotantes, maximo 2 a la vez) ----
-function renderMensajesPrivado(canalId) {
-  const cont = document.getElementById(`chatPrivado_${canalId}`);
-  const p = privados[canalId];
-  if (!cont || !p) return;
-  cont.innerHTML = '';
-
-  if (usuariosIgnorados.has(p.conNick)) {
-    cont.innerHTML = '<p class="aviso-silenciado">🔇 Has silenciado a esta persona. Ya no ves sus mensajes.</p>';
-    return;
-  }
-
-  p.mensajes.forEach(m => {
-    const div = document.createElement('div');
-    div.className = 'msg-privado' + (m.nick === miNick ? ' propio' : '');
-    const cuerpo = m.tipo === 'imagen'
-      ? `<img src="${m.imagenDataUrl}" alt="Imagen privada">`
-      : `<div>${escapar(m.texto)}</div>`;
-    div.innerHTML = `<div class="nick-privado" style="color:${colorDeNick(m.nick)}">${escapar(m.nick)}</div>${cuerpo}<div class="hora">${m.hora}</div>`;
-    cont.appendChild(div);
-  });
-  cont.scrollTop = cont.scrollHeight;
-}
-
+// ---- Chats privados: una pestaña arriba (con el nombre de la persona) y la conversación en el centro ----
 function renderPrivados() {
-  privadosContenedor.innerHTML = '';
-  Object.keys(privados).forEach(canalId => {
-    const p = privados[canalId];
-    const div = document.createElement('div');
-    div.className = 'ventana-privado';
-    div.innerHTML = `
-      <div class="ventana-privado-cab">
-        <span>${escapar(p.conNick)}${p.conectado ? '' : ' <span class="estado-privado">(desconectado)</span>'}</span>
-        <div class="ventana-privado-cab-botones">
-          <button type="button" class="btn-silenciar-privado" title="Silenciar a esta persona">${usuariosIgnorados.has(p.conNick) ? '🔇' : '🔊'}</button>
-          <button type="button" class="btn-cerrar-privado">✕</button>
-        </div>
-      </div>
-      <div class="ventana-privado-chat" id="chatPrivado_${canalId}"></div>
-      <div class="ventana-privado-input">
-        <input type="text" placeholder="Mensaje privado..." maxlength="400" ${p.conectado ? '' : 'disabled'}>
-        <button type="button" class="btn-foto-privado" ${p.conectado ? '' : 'disabled'}>📷</button>
-        <button type="button" class="btn-enviar-privado" ${p.conectado ? '' : 'disabled'}>➤</button>
-      </div>
-    `;
-    privadosContenedor.appendChild(div);
-    renderMensajesPrivado(canalId);
-
-    div.querySelector('.btn-silenciar-privado').addEventListener('click', () => {
-      if (usuariosIgnorados.has(p.conNick)) usuariosIgnorados.delete(p.conNick);
-      else usuariosIgnorados.add(p.conNick);
-      guardarIgnorados();
-      renderPrivados();
-      renderMensajes();
-    });
-
-    div.querySelector('.btn-cerrar-privado').addEventListener('click', () => {
-      socket.emit('cerrarPrivado', { canalId });
-      delete privados[canalId];
-      renderPrivados();
-    });
-
-    const inputP = div.querySelector('input[type="text"]');
-    const enviar = () => {
-      const texto = inputP.value.trim();
-      if (!texto) return;
-      socket.emit('mensajePrivado', { canalId, texto });
-      inputP.value = '';
-    };
-    div.querySelector('.btn-enviar-privado').addEventListener('click', enviar);
-    inputP.addEventListener('keydown', (e) => { if (e.key === 'Enter') enviar(); });
-
-    div.querySelector('.btn-foto-privado').addEventListener('click', () => {
-      const inputTemp = document.createElement('input');
-      inputTemp.type = 'file';
-      inputTemp.accept = 'image/*';
-      inputTemp.addEventListener('change', () => {
-        if (inputTemp.files[0]) manejarArchivoSeleccionado(inputTemp.files[0], { tipo: 'privado', canalId });
-      });
-      inputTemp.click();
-    });
-  });
+  renderPestañas();
+  renderMensajes();
 }
 
-socket.on('privadoAbierto', ({ canalId, conNick }) => {
-  if (!privados[canalId]) privados[canalId] = { conNick, mensajes: [], conectado: true };
-  renderPrivados();
+btnSilenciarPrivado.addEventListener('click', () => {
+  const p = privadoActual();
+  if (!p) return;
+  if (usuariosIgnorados.has(p.conNick)) usuariosIgnorados.delete(p.conNick);
+  else usuariosIgnorados.add(p.conNick);
+  guardarIgnorados();
+  renderBarraPrivado();
+  renderMensajes();
 });
 
+btnCerrarPrivado.addEventListener('click', () => {
+  if (!privadoActivo) return;
+  const canalId = privadoActivo;
+  socket.emit('cerrarPrivado', { canalId });
+  delete privados[canalId];
+  privadoActivo = null;
+  renderTodoElCentro();
+});
+
+socket.on('privadoAbierto', ({ canalId, conNick, iniciaste }) => {
+  if (!privados[canalId]) privados[canalId] = { conNick, mensajes: [], conectado: true, sinLeer: 0, nuevo: false };
+  if (iniciaste) {
+    activarPrivado(canalId);
+  } else {
+    privados[canalId].nuevo = true;
+    renderPestañas();
+    avisarMensajePrivadoNuevo();
+    mostrarToast(`${conNick} ha abierto un chat privado contigo (mira las pestañas de arriba)`);
+  }
+});
+
+function recibirPrivado(canalId, mensaje) {
+  const p = privados[canalId];
+  if (!p) return;
+  p.mensajes.push(mensaje);
+  if (canalId === privadoActivo) {
+    renderMensajes();
+  } else if (mensaje.nick !== miNick) {
+    p.sinLeer = (p.sinLeer || 0) + 1;
+    renderPestañas();
+  }
+  if (mensaje.nick !== miNick) avisarMensajePrivadoNuevo();
+}
+
 socket.on('mensajePrivado', ({ canalId, nick, texto, hora }) => {
-  if (!privados[canalId]) return;
-  privados[canalId].mensajes.push({ nick, texto, hora, tipo: 'texto' });
-  renderMensajesPrivado(canalId);
-  if (nick !== miNick) avisarMensajePrivadoNuevo();
+  recibirPrivado(canalId, { nick, texto, hora, tipo: 'texto' });
 });
 
 socket.on('imagenPrivada', ({ canalId, nick, imagenDataUrl, hora }) => {
-  if (!privados[canalId]) return;
-  privados[canalId].mensajes.push({ nick, imagenDataUrl, hora, tipo: 'imagen' });
-  renderMensajesPrivado(canalId);
-  if (nick !== miNick) avisarMensajePrivadoNuevo();
+  recibirPrivado(canalId, { nick, imagenDataUrl, hora, tipo: 'imagen' });
 });
 
 socket.on('privadoCerrado', ({ canalId, motivo }) => {
   if (!privados[canalId]) return;
   if (motivo === 'desconexion') {
+    // Se queda la conversación para poder leerla; se quita con "Cerrar chat"
     privados[canalId].conectado = false;
-    renderPrivados();
-    setTimeout(() => { delete privados[canalId]; renderPrivados(); }, 5000);
+    renderPestañas();
   } else {
     delete privados[canalId];
-    renderPrivados();
+    if (privadoActivo === canalId) privadoActivo = null;
+    renderTodoElCentro();
   }
 });
 
@@ -1037,7 +1126,7 @@ function cerrarDrawers() { document.body.classList.remove('drawer-salas', 'drawe
 
 function mostrarChat() {
   document.body.dataset.vista = 'chat';
-  // Quien entra al chat (y no es del equipo) aparece directamente en La Plaza
+  // Quien entra al chat aparece directamente en La Plaza (el staff además entra en Staff y en todas las salas: lo hace el servidor)
   if (!esPrivilegiado() && !salasUnidas.has('plaza')) socket.emit('unirseSala', { salaId: 'plaza' });
   avisarAcceso('');
   sincronizarRolUI();
@@ -1078,14 +1167,14 @@ socket.on('disconnect', () => { estadoConexion.textContent = 'Reconectando…'; 
 socket.on('sesionIniciada', () => { mostrarChat(); });
 socket.on('sesionCerrada', () => { mostrarAcceso(); sincronizarRolUI(); });
 socket.on('rolAsignado', sincronizarRolUI);
-socket.on('unido', cerrarDrawers);
-socket.on('privadoAbierto', cerrarDrawers);
+socket.on('unido', ({ auto }) => { if (!auto) cerrarDrawers(); });
 
 // Si el servidor se reinicia, la sesión en memoria se pierde: volvemos al acceso en limpio
 socket.on('bienvenida', () => {
   if (yaSaludo && document.body.dataset.vista === 'chat') {
     salasUnidas.clear();
     salaActiva = null;
+    privadoActivo = null;
     miRol = 'usuario';
     Object.keys(mensajesPorSala).forEach(k => delete mensajesPorSala[k]);
     Object.keys(privados).forEach(k => delete privados[k]);
@@ -1459,7 +1548,7 @@ socket.on('reacciones', ({ salaId, mensajeId, reacciones }) => {
   const item = (mensajesPorSala[salaId] || []).find(m => m.id === mensajeId);
   if (!item) return;
   item.reacciones = reacciones;
-  if (salaId === salaActiva) {
+  if (salaVisible(salaId)) {
     const alFinal = chat.scrollHeight - chat.scrollTop - chat.clientHeight < 40;
     renderMensajes(alFinal ? undefined : chat.scrollTop);
   }

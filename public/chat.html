@@ -131,6 +131,13 @@
 
       <main class="zona-chat">
         <div class="pestañas" id="pestañas"></div>
+        <div class="barra-privado oculto" id="barraPrivado">
+          <span class="barra-privado-titulo" id="barraPrivadoTitulo"></span>
+          <div class="barra-privado-botones">
+            <button type="button" id="btnSilenciarPrivado" class="btn-barra-privado">🔊 Silenciar</button>
+            <button type="button" id="btnCerrarPrivado" class="btn-barra-privado btn-barra-cerrar">✕ Cerrar chat</button>
+          </div>
+        </div>
         <div class="chat" id="chat"></div>
         <p class="escribiendo-aviso" id="avisoEscribiendo"></p>
         <div class="compositor-envoltorio">
@@ -152,15 +159,13 @@
       <aside class="barra-conectados">
         <button type="button" class="cerrar-drawer" aria-label="Cerrar panel">✕ Cerrar</button>
         <div class="conectados-cab">
-          <p>En esta sala</p>
+          <p id="tituloConectados">En esta sala</p>
           <span id="contadorConectadosSala" class="badge-contador">0</span>
         </div>
         <div id="listaConectadosSala" class="lista-conectados"></div>
       </aside>
     </div>
   </div>
-
-  <div id="privadosContenedor" class="privados-contenedor"></div>
 
   <!-- ============ MODAL: CORREO DE RECUPERACIÓN ============ -->
   <div id="modalCorreo" class="modal-fondo oculto">
